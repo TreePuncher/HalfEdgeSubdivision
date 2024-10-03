@@ -1,3 +1,5 @@
 .vs/*
 out/*
 assetPacks/*
+Modules/*
+generated_headers/*
