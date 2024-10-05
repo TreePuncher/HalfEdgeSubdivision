@@ -8,7 +8,7 @@ cbuffer constants : register(b)
 };
 
 
-Buffer<uint> CBTBuffer : register(t0);
+RWBuffer<uint> CBTBuffer : register(t0);
 
 
 float3x3 M0()
@@ -32,10 +32,15 @@ uint FindMSB(uint heapID)
 	return firstbithigh(heapID);
 }
 
+uint FindLSB(uint x)
+{
+	return firstbitlow(x);
+}
+
 
 uint Depth(uint Bit)
 {
-	return DEPTH - log2(Bit + 1);
+	return maxDepth - log2(Bit + 1);
 }
 
 uint ipow(uint base, uint exp)
@@ -54,11 +59,19 @@ uint ipow(uint base, uint exp)
 	return result;
 }
 
+
+uint BitToHeapIndex()
+{
+	
+}
+
+uint HeapIndexToBitIndex(const uint k) { return k * ipow(2, maxDepth - FindMSB(k)) - ipow(2, maxDepth); }
+
 [RootSignature(RS1)]
 [NumThreads(1, 1, 1)]
 void UpdateCBT(const uint threadID : SV_DispatchThreadID)
 {
-	
+	CBTBuffer[0] = 0x01;
 }
 
 [RootSignature(RS1)]

@@ -2,13 +2,78 @@
 #include <FrameGraph.hpp>
 #include <graphics.hpp>
 #include <Type.hpp>
+#include <bit>
+
 
 namespace FlexKit
 {	/************************************************************************************************/
 
 
-	CBTBuffer::CBTBuffer(RenderSystem& IN_renderSystem) :
-		renderSystem{ IN_renderSystem }
+	constexpr uint64_t FindMSB(uint64_t n) noexcept
+	{
+#ifdef WIN32
+		if(std::is_constant_evaluated())
+		{
+			return std::bit_ceil(n);
+		}
+		else
+		{
+			unsigned long index = 0;
+			_BitScanReverse64(&index, n);
+			return index;
+		}
+#else
+		return std::bit_ceil(n);
+#endif
+	}
+
+
+	/************************************************************************************************/
+
+
+	constexpr uint64_t FindLSB(uint32_t n) noexcept
+	{
+#ifdef WIN32
+		if(std::is_constant_evaluated())
+		{
+			return std::bit_floor(n);
+		}
+		else
+		{
+			unsigned long index = 0;
+			_BitScanForward64(&index, n);
+			return index;
+		}
+#else
+		return std::bit_floor(n);
+#endif
+	}
+
+
+	/************************************************************************************************/
+
+	uint32_t ipow(uint32_t base, uint32_t exp) noexcept
+	{
+		uint result = 1;
+		for (;;)
+		{
+			if (exp & 1)
+				result *= base;
+			exp >>= 1;
+			if (!exp)
+				break;
+			base *= base;
+		}
+
+		return result;
+	}
+
+	/************************************************************************************************/
+
+
+	CBTBuffer::CBTBuffer(RenderSystem& IN_renderSystem, iAllocator& IN_persistent) :
+		renderSystem	{ IN_renderSystem	},
+		bitField		{ IN_persistent		}
 	{
 		states.Initialize(renderSystem);
 	}
@@ -89,9 +154,12 @@ namespace FlexKit
 		if (buffer)
 			renderSystem.ReleaseResource(buffer);
 
-		auto bufferSize = GetCBTSizeBytes(description.maxDepth) * description.cbtTreeCount;
+		auto bufferSize = GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount);
 		buffer			= renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(bufferSize));
 		maxDepth		= description.maxDepth;
+
+		bitField.resize(bufferSize);
+		memset(bitField.data(), 0x00, bitField.ByteSize());
 	}
 
 

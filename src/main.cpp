@@ -59,7 +59,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		FlexKit::FrameworkState	{ in_framework },
 		testComponent			{ in_framework.core.GetBlockMemory() },
 		complexComponent		{ in_framework.core.GetBlockMemory() },
-		tree					{ in_framework.GetRenderSystem() },
+		tree					{ in_framework.GetRenderSystem(), in_framework.core.GetBlockMemory() },
 		runOnce					{ in_framework.core.GetBlockMemory() }
 	{
 		renderWindow = FlexKit::CreateWin32RenderWindow(framework.GetRenderSystem(), 
@@ -82,7 +82,23 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				return FlexKit::CreateDrawTriStatePSO(renderSystem, allocator);
 			});
 
-		tree.Initialize();
+		tree.Initialize({ .maxDepth = 4 });
+		uint32_t heapIndex = tree.BitToHeapIndex(0);
+
+
+		for (int i = 0; i < 16; i++)
+		{
+			tree.SetBit(i, true);
+		}
+
+		auto a = tree.GetBitOffset(16);
+		auto b = tree.GetBitOffset(8);
+		auto c = tree.GetBitOffset(4);
+		auto d = tree.GetBitOffset(2);
+		auto e = tree.GetBitOffset(1);
+		auto f = tree.GetBitOffset(0);
+
+		tree.SumReduction();
 
 		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph) 
 			{
