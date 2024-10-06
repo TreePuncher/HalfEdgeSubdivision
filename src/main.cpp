@@ -86,23 +86,63 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		uint32_t heapIndex = tree.BitToHeapIndex(0);
 
 
-		for (int i = 0; i < 16; i++)
-		{
-			tree.SetBit(i, true);
-		}
+		tree.SetBit(0, true);
+		tree.SetBit(1, false);
+		tree.SetBit(2, true);
+		tree.SetBit(3, false);
+		tree.SetBit(4, true);
+		tree.SetBit(5, true);
+		tree.SetBit(6, true);
+		tree.SetBit(7, false);
+		tree.SetBit(8, true);
+		tree.SetBit(9, false);
+		tree.SetBit(10, true);
+		tree.SetBit(11, true);
+		tree.SetBit(12, true);
+		tree.SetBit(13, true);
+		tree.SetBit(14, true);
+		tree.SetBit(15, false);
+
+		auto bit0 = tree.GetHeapValue(16);
 
 		auto a = tree.GetBitOffset(16);
 		auto b = tree.GetBitOffset(8);
 		auto c = tree.GetBitOffset(4);
 		auto d = tree.GetBitOffset(2);
 		auto e = tree.GetBitOffset(1);
-		auto f = tree.GetBitOffset(0);
 
 		tree.SumReduction();
+		auto res0 = tree.GetHeapValue(1);
+		auto res1 = tree.GetHeapValue(2);
+		auto res2 = tree.GetHeapValue(3);
+		auto res3 = tree.GetHeapValue(4);
+		auto res4 = tree.GetHeapValue(5);
+		auto res5 = tree.GetHeapValue(6);
+		auto res6 = tree.GetHeapValue(7);
+		auto res7 = tree.GetHeapValue(8);
+		auto res8 = tree.GetHeapValue(9);
+		auto res9 = tree.GetHeapValue(10);
+		auto res10 = tree.GetHeapValue(11);
+		auto res11 = tree.GetHeapValue(12);
+		auto res12 = tree.GetHeapValue(13);
+		auto res13 = tree.GetHeapValue(14);
+		auto res14 = tree.GetHeapValue(15);
+
+		auto n1 = tree.DecodeNode(0);
+		auto n2 = tree.DecodeNode(1);
+		auto n3 = tree.DecodeNode(2);
+		auto n4 = tree.DecodeNode(3);
+		auto n5 = tree.DecodeNode(4);
+		auto n6 = tree.DecodeNode(5);
+		auto n7 = tree.DecodeNode(6);
+		auto n8 = tree.DecodeNode(7);
+		auto n9 = tree.DecodeNode(8);
+		auto n10 = tree.DecodeNode(9);
+		auto n11 = tree.DecodeNode(10);
 
 		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph) 
 			{
-				tree.Clear(frameGraph);
+				tree.Upload(frameGraph);
 			});
 
 	}
@@ -206,6 +246,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				
 				FlexKit::RenderTargetList renderTargets = { resources.RenderTarget(debugVis.renderTarget, ctx) };
 				ctx.SetScissorAndViewports(renderTargets);
+				ctx.SetInputPrimitive(FlexKit::EInputPrimitive::INPUTPRIMITIVETRIANGLELIST);
 				ctx.SetRenderTargets(renderTargets);
 				ctx.Draw(3);
 			});
@@ -217,6 +258,9 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		frameGraph.AddOutput(renderWindow->GetBackBuffer());
 
 		FlexKit::ClearBackBuffer(frameGraph, renderWindow->GetBackBuffer());
+
+
+		runOnce.Process(frameGraph);
 
 		tree.Update(frameGraph);
 		//gpuMemoryManager.DrawDebugVIS(frameGraph, renderWindow->GetBackBuffer());
@@ -235,6 +279,9 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 	bool EventHandler(FlexKit::Event evt) 
 	{
+		if (evt.E_SystemEvent && evt.Action == FlexKit::Event::InputAction::Exit)
+			framework.quit = true;
+
 		return false; 
 	}
 

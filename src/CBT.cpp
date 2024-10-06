@@ -9,7 +9,7 @@ namespace FlexKit
 {	/************************************************************************************************/
 
 
-	constexpr uint64_t FindMSB(uint64_t n) noexcept
+	uint64_t FindMSB(uint64_t n) noexcept
 	{
 #ifdef WIN32
 		if(std::is_constant_evaluated())
@@ -18,7 +18,7 @@ namespace FlexKit
 		}
 		else
 		{
-			unsigned long index = 0;
+			unsigned long index = n;
 			_BitScanReverse64(&index, n);
 			return index;
 		}
@@ -31,7 +31,7 @@ namespace FlexKit
 	/************************************************************************************************/
 
 
-	constexpr uint64_t FindLSB(uint32_t n) noexcept
+	uint64_t FindLSB(uint64_t n) noexcept
 	{
 #ifdef WIN32
 		if(std::is_constant_evaluated())
@@ -41,7 +41,7 @@ namespace FlexKit
 		else
 		{
 			unsigned long index = 0;
-			_BitScanForward64(&index, n);
+			_BitScanForward64(&index, n) + 1;
 			return index;
 		}
 #else
@@ -158,7 +158,7 @@ namespace FlexKit
 		buffer			= renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(bufferSize));
 		maxDepth		= description.maxDepth;
 
-		bitField.resize(bufferSize);
+		bitField.resize(Max(1, bufferSize / sizeof(uint64_t)));
 		memset(bitField.data(), 0x00, bitField.ByteSize());
 	}
 
@@ -187,6 +187,32 @@ namespace FlexKit
 				ctx.SetComputeUnorderedAccessView(0, handler.UAV(args.buffer, ctx));
 				ctx.SetComputeConstantValue(1, 1, &bufferSize);
 				ctx.Dispatch({ 1, 1, 1 });
+			}
+		);
+	}
+
+
+	/************************************************************************************************/
+
+
+	void CBTBuffer::Upload(FrameGraph& frameGraph)
+	{
+		struct InitializeCBTree
+		{
+			FrameResourceHandle buffer;
+		};
+
+		frameGraph.AddNode<InitializeCBTree>(
+			{},
+			[&](FrameGraphNodeBuilder& builder, InitializeCBTree& args)
+			{
+				args.buffer = builder.CopyDest(buffer);
+			},
+			[this](InitializeCBTree& args, ResourceHandler& handler, Context& ctx, iAllocator& allocator)
+			{
+				auto upload = ctx.ReserveDirectUploadSpace(bitField.ByteSize());
+				memcpy(upload.buffer, bitField.data(), bitField.ByteSize());
+				ctx.CopyBuffer(upload, handler.CopyDest(args.buffer, ctx));
 			}
 		);
 	}

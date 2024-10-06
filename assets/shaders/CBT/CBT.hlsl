@@ -10,7 +10,7 @@ cbuffer constants : register(b)
 
 RWBuffer<uint> CBTBuffer : register(t0);
 
-
+/*
 float3x3 M0()
 {
 	return float3x3(
@@ -66,12 +66,13 @@ uint BitToHeapIndex()
 }
 
 uint HeapIndexToBitIndex(const uint k) { return k * ipow(2, maxDepth - FindMSB(k)) - ipow(2, maxDepth); }
+*/
 
 [RootSignature(RS1)]
 [NumThreads(1, 1, 1)]
 void UpdateCBT(const uint threadID : SV_DispatchThreadID)
 {
-	CBTBuffer[0] = 0x01;
+	//CBTBuffer[0] = 0x01;
 }
 
 [RootSignature(RS1)]

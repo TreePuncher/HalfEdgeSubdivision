@@ -30,8 +30,6 @@ target_include_directories(
 	PUBLIC
 	${PROJECT_SOURCE_DIR}/includes)
 
-target_compile_options(TestApp PUBLIC /UTF-8 /bigobj)
-
 set_property(TARGET TestApp PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 target_link_libraries(TestApp PRIVATE flex flex_optional)
 
