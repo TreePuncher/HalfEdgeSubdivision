@@ -108,7 +108,7 @@ namespace FlexKit
 						AddInputTopology(ETopology::EIT_TRIANGLE).
 						AddVertexShader("DrawCBT_VS", "assets\\shaders\\cbt\\CBT.hlsl").
 						AddPixelShader("DrawCBT_PS", "assets\\shaders\\cbt\\CBT.hlsl").
-						AddRasterizerState({ .fill = EFillMode::WIREFRAME }).
+						AddRasterizerState({ .fill = EFillMode::SOLID, .CullMode = ECullMode::NONE }).
 						AddRenderTargetState(
 							{	.targetCount	= 1, 
 								.targetFormats	= { DeviceFormat::R16G16B16A16_FLOAT } }).

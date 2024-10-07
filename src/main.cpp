@@ -88,7 +88,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		tree.SetBit(0, true);
 		tree.SetBit(1, false);
-		tree.SetBit(2, true);
+		tree.SetBit(2, false);
 		tree.SetBit(3, false);
 		tree.SetBit(4, true);
 		tree.SetBit(5, true);
@@ -103,6 +103,23 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		tree.SetBit(14, true);
 		tree.SetBit(15, false);
 
+		//tree.SetBit(0, true);
+		//tree.SetBit(1, false);
+		//tree.SetBit(2, false);
+		//tree.SetBit(3, false);
+		//tree.SetBit(4, false);
+		//tree.SetBit(5, false);
+		//tree.SetBit(6, false);
+		//tree.SetBit(7, false);
+		//tree.SetBit(8, true);
+		//tree.SetBit(9, false);
+		//tree.SetBit(10, false);
+		//tree.SetBit(11, false);
+		//tree.SetBit(12, false);
+		//tree.SetBit(13, false);
+		//tree.SetBit(14, false);
+		//tree.SetBit(15, false);
+
 		auto bit0 = tree.GetHeapValue(16);
 
 		auto a = tree.GetBitOffset(16);
@@ -112,21 +129,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		auto e = tree.GetBitOffset(1);
 
 		tree.SumReduction();
-		auto res0 = tree.GetHeapValue(1);
-		auto res1 = tree.GetHeapValue(2);
-		auto res2 = tree.GetHeapValue(3);
-		auto res3 = tree.GetHeapValue(4);
-		auto res4 = tree.GetHeapValue(5);
-		auto res5 = tree.GetHeapValue(6);
-		auto res6 = tree.GetHeapValue(7);
-		auto res7 = tree.GetHeapValue(8);
-		auto res8 = tree.GetHeapValue(9);
-		auto res9 = tree.GetHeapValue(10);
-		auto res10 = tree.GetHeapValue(11);
-		auto res11 = tree.GetHeapValue(12);
-		auto res12 = tree.GetHeapValue(13);
-		auto res13 = tree.GetHeapValue(14);
-		auto res14 = tree.GetHeapValue(15);
 
 		auto n1 = tree.DecodeNode(0);
 		auto n2 = tree.DecodeNode(1);
@@ -138,7 +140,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		auto n8 = tree.DecodeNode(7);
 		auto n9 = tree.DecodeNode(8);
 		auto n10 = tree.DecodeNode(9);
-		auto n11 = tree.DecodeNode(10);
 
 		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph) 
 			{
@@ -248,7 +249,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				ctx.SetScissorAndViewports(renderTargets);
 				ctx.SetInputPrimitive(FlexKit::EInputPrimitive::INPUTPRIMITIVETRIANGLELIST);
 				ctx.SetRenderTargets(renderTargets);
-				ctx.Draw(3);
+				ctx.Draw(3 * tree.GetHeapValue(1));
 			});
 	}
 
