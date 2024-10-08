@@ -41,7 +41,7 @@ namespace FlexKit
 		else
 		{
 			unsigned long index = 0;
-			_BitScanForward64(&index, n) + 1;
+			_BitScanForward64(&index, n);
 			return index;
 		}
 #else
@@ -97,7 +97,7 @@ namespace FlexKit
 			UpdateCBTTree, [](RenderSystem* renderSystem, iAllocator& allocator) -> LoadPipelineStateRes
 			{
 				return PipelineBuilder{ allocator }.
-						AddComputeShader("UpdateCBT", "assets\\shaders\\cbt\\CBT.hlsl", { .hlsl2021 = true }).
+						AddComputeShader("SumReduction", "assets\\shaders\\cbt\\CBT_SumReduction.hlsl", { .hlsl2021 = true }).
 						Build(*renderSystem);
 			});
 
@@ -106,8 +106,8 @@ namespace FlexKit
 			{
 				return PipelineBuilder{ allocator }.
 						AddInputTopology(ETopology::EIT_TRIANGLE).
-						AddVertexShader("DrawCBT_VS", "assets\\shaders\\cbt\\CBT.hlsl").
-						AddPixelShader("DrawCBT_PS", "assets\\shaders\\cbt\\CBT.hlsl").
+						AddVertexShader("DrawCBT_VS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl").
+						AddPixelShader("DrawCBT_PS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl").
 						AddRasterizerState({ .fill = EFillMode::SOLID, .CullMode = ECullMode::NONE }).
 						AddRenderTargetState(
 							{	.targetCount	= 1, 
@@ -154,10 +154,12 @@ namespace FlexKit
 		if (buffer != InvalidHandle)
 			renderSystem.ReleaseResource(buffer);
 
-		auto size	= 1024;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
+		auto size	= 4096 * 4;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
 		buffer		= renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(size));
 		maxDepth	= description.maxDepth;
 		bufferSize	= size;
+
+		renderSystem.SetDebugName(buffer, "CBTBuffer");
 
 		bitField.resize(Max(1, size / sizeof(uint64_t)));
 		memset(bitField.data(), 0x00, bitField.ByteSize());
@@ -180,16 +182,45 @@ namespace FlexKit
 			{
 				args.buffer = builder.UnorderedAccess(buffer);
 			},
-			[](InitializeCBTree& args, ResourceHandler& handler, Context& ctx, iAllocator& allocator)
+			[this](InitializeCBTree& args, ResourceHandler& handler, Context& ctx, iAllocator& allocator)
 			{
 				uint32_t bufferSize = 32;
 
+				struct
+				{
+					uint32_t maxDepth;
+					uint32_t i;
+					uint32_t stepSize;
+					uint32_t end;
+					uint32_t start_IN;
+					uint32_t start_OUT;
+				} constants;
+
 				ctx.SetComputePipelineState(UpdateCBTTree, allocator);
 				ctx.SetComputeUnorderedAccessView(0, handler.UAV(args.buffer, ctx));
-				ctx.SetComputeConstantValue(1, 1, &bufferSize);
-				ctx.Dispatch({ 1, 1, 1 });
-			}
-		);
+
+				uint32_t	stepSize	= 1;
+				uint32_t	steps		= ipow(2, maxDepth - 1);
+
+				constants.maxDepth = maxDepth;
+
+				for (uint64_t i = 0; i < maxDepth; i++)
+				{
+					constants.stepSize	= stepSize;
+					constants.i			= i;
+					constants.end		= steps;
+					constants.start_IN	= GetBitOffset(ipow(2, maxDepth - 0 - i));
+					constants.start_OUT	= GetBitOffset(ipow(2, maxDepth - 1 - i));
+
+					ctx.SetComputeConstantValue(1, 6, &constants);
+					ctx.Dispatch({ steps / 64 + 1, 1, 1 });
+
+					ctx.AddUAVBarrier(handler.GetResource(args.buffer), -1, DeviceLayout_Unknown, Sync_Compute, Sync_Compute);
+
+					stepSize	+= 1;
+					steps		/= 2;
+				}
+			});
 	}
 
 

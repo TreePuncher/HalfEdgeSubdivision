@@ -82,16 +82,16 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				return FlexKit::CreateDrawTriStatePSO(renderSystem, allocator);
 			});
 
-		const uint32_t depth = 10;
+		const uint32_t depth = 15;
 		tree.Initialize({ .maxDepth = depth });
 
-		for (int i = 0; i < (1 << depth); i++)
-			tree.SetBit(i, rand() % 2 == 0);
+		uint32_t expectedSum = 0;
+		for (int i = 0; i < (1 << depth); i += 1)
+		{
+			tree.SetBit(i, true);
+		}
 
-		tree.SumReduction();
-
-		for (int i = 0; i < tree.GetHeapValue(1); i++)
-			std::print("{}: {}\n", i, tree.DecodeNode(i));
+		//tree.SumReduction();
 
 		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph) 
 			{
@@ -204,7 +204,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 				auto temp = tree.GetHeapValue(1);
 
-				ctx.Draw(3 * tree.GetHeapValue(1));
+				ctx.Draw(3 * (1 << tree.maxDepth));
 			});
 	}
 
@@ -214,7 +214,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		frameGraph.AddOutput(renderWindow->GetBackBuffer());
 
 		FlexKit::ClearBackBuffer(frameGraph, renderWindow->GetBackBuffer());
-
 
 		runOnce.Process(frameGraph);
 
