@@ -82,64 +82,16 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				return FlexKit::CreateDrawTriStatePSO(renderSystem, allocator);
 			});
 
-		tree.Initialize({ .maxDepth = 4 });
-		uint32_t heapIndex = tree.BitToHeapIndex(0);
+		const uint32_t depth = 10;
+		tree.Initialize({ .maxDepth = depth });
 
-
-		tree.SetBit(0, true);
-		tree.SetBit(1, false);
-		tree.SetBit(2, false);
-		tree.SetBit(3, false);
-		tree.SetBit(4, true);
-		tree.SetBit(5, true);
-		tree.SetBit(6, true);
-		tree.SetBit(7, false);
-		tree.SetBit(8, true);
-		tree.SetBit(9, false);
-		tree.SetBit(10, true);
-		tree.SetBit(11, true);
-		tree.SetBit(12, true);
-		tree.SetBit(13, true);
-		tree.SetBit(14, true);
-		tree.SetBit(15, false);
-
-		//tree.SetBit(0, true);
-		//tree.SetBit(1, false);
-		//tree.SetBit(2, false);
-		//tree.SetBit(3, false);
-		//tree.SetBit(4, false);
-		//tree.SetBit(5, false);
-		//tree.SetBit(6, false);
-		//tree.SetBit(7, false);
-		//tree.SetBit(8, true);
-		//tree.SetBit(9, false);
-		//tree.SetBit(10, false);
-		//tree.SetBit(11, false);
-		//tree.SetBit(12, false);
-		//tree.SetBit(13, false);
-		//tree.SetBit(14, false);
-		//tree.SetBit(15, false);
-
-		auto bit0 = tree.GetHeapValue(16);
-
-		auto a = tree.GetBitOffset(16);
-		auto b = tree.GetBitOffset(8);
-		auto c = tree.GetBitOffset(4);
-		auto d = tree.GetBitOffset(2);
-		auto e = tree.GetBitOffset(1);
+		for (int i = 0; i < (1 << depth); i++)
+			tree.SetBit(i, rand() % 2 == 0);
 
 		tree.SumReduction();
 
-		auto n1 = tree.DecodeNode(0);
-		auto n2 = tree.DecodeNode(1);
-		auto n3 = tree.DecodeNode(2);
-		auto n4 = tree.DecodeNode(3);
-		auto n5 = tree.DecodeNode(4);
-		auto n6 = tree.DecodeNode(5);
-		auto n7 = tree.DecodeNode(6);
-		auto n8 = tree.DecodeNode(7);
-		auto n9 = tree.DecodeNode(8);
-		auto n10 = tree.DecodeNode(9);
+		for (int i = 0; i < tree.GetHeapValue(1); i++)
+			std::print("{}: {}\n", i, tree.DecodeNode(i));
 
 		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph) 
 			{
@@ -249,6 +201,9 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				ctx.SetScissorAndViewports(renderTargets);
 				ctx.SetInputPrimitive(FlexKit::EInputPrimitive::INPUTPRIMITIVETRIANGLELIST);
 				ctx.SetRenderTargets(renderTargets);
+
+				auto temp = tree.GetHeapValue(1);
+
 				ctx.Draw(3 * tree.GetHeapValue(1));
 			});
 	}

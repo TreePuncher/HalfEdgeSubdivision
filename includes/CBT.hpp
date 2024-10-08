@@ -99,7 +99,7 @@ namespace FlexKit
 
 		inline static PipelineStates states;
 
-		uint32_t Depth(uint32_t Bit)
+		uint32_t Depth(uint32_t Bit) const
 		{
 			return maxDepth - log2(Bit + 1);
 		}
@@ -120,15 +120,9 @@ namespace FlexKit
 
 		uint64_t GetHeapValue(uint32_t heapIdx) const noexcept
 		{
-			const uint64_t bitIdx		= GetBitOffset(heapIdx);
-			const uint64_t bitWidth		= maxDepth - FindMSB(heapIdx) + 1;
-			const uint64_t wordIdx		= bitIdx / (8 * sizeof(uint64_t));
-			const uint64_t bitOffset	= bitIdx % (8 * sizeof(uint64_t));
-			const uint64_t mask			= ((uint64_t{ 1 } << (bitWidth)) - 1) << bitOffset;
-			const uint64_t qw			= bitField[wordIdx];
-			const uint64_t value		= qw & mask;
-
-			return value >> bitOffset;
+			const uint32_t bitIdx	= GetBitOffset(heapIdx);
+			const uint32_t bitWidth = maxDepth - FindMSB(heapIdx) + 1;
+			return ReadValue(bitIdx, bitWidth);
 		}
 
 		uint32_t DecodeNode(int32_t leafID)
@@ -173,7 +167,7 @@ namespace FlexKit
 			bitField[wordIdx] = newValue;
 		}
 
-		uint64_t GetBit(uint64_t idx, bool b)
+		uint64_t GetBit(uint64_t idx, bool b) const
 		{
 			auto bitIdx			= (maxDepth) * ipow(2, maxDepth) + idx;
 			auto wordIdx		= bitIdx / (8 * sizeof(uint64_t));
@@ -183,41 +177,61 @@ namespace FlexKit
 			return bits & (0x01 << bitOffset);
 		}
 
+		uint64_t ReadValue(uint64_t start, uint64_t bitWidth) const
+		{
+			const uint64_t	mask	= (uint64_t(1) << (bitWidth)) - 1;
+			const uint64_t	idx		= start / 64;
+			const uint64_t	offset	= start % 64;
+
+			uint64_t value	= (bitField[idx] >> offset) & mask;
+			if (((start % 64) + bitWidth) > 64)
+			{
+				uint32_t bitsRemaining = ((start % 64) + bitWidth) % 64;
+				uint64_t remainingBits = bitField[idx + 1] << (bitWidth - bitsRemaining);
+
+				value |= (remainingBits & mask);
+			}
+
+			return value;
+		}
+
+		void WriteValue(uint64_t start, uint64_t bitWidth, uint64_t value)
+		{
+			const uint64_t	idx		= start / 64;
+			const uint64_t	offset	= start % 64;
+			uint64_t		mask	= ~(((uint64_t(1) << (bitWidth)) - 1) << offset);
+
+			auto QWord = (bitField[idx] & mask) | (~mask & (value << offset));
+			bitField[idx] = QWord;
+
+			if (((start % 64) + bitWidth) > 64)
+			{
+				const uint32_t bitsRemaining	= ((start % 64) + bitWidth) % 64;
+				const uint64_t remainingBits	= value >> (bitWidth - bitsRemaining);
+				const uint64_t mask				= ~(((uint64_t(1) << (bitWidth)) - 1) >> (bitWidth - bitsRemaining));
+
+				bitField[idx + 1] = remainingBits | (bitField[idx + 1] & mask);
+			}
+		}
+
 		void SumReduction()
 		{
 			const int	end			= maxDepth;
-			int			stepSize	= 1;
-			int			steps		= ipow(2, maxDepth - 1);
+			uint64_t	stepSize	= 1;
+			uint64_t	steps		= ipow(2, maxDepth - 1);
 			
-			for (int i = 0; i < end; i++)
+			for (uint64_t i = 0; i < end; i++)
 			{
 				const uint64_t start_IN		= GetBitOffset(ipow(2, maxDepth - 0 - i));
 				const uint64_t start_OUT	= GetBitOffset(ipow(2, maxDepth - 1 - i));
-				const uint64_t mask_in		= (uint64_t{ 1 } << (i + 1)) - 1;
-				const uint64_t mask_out		= (uint64_t{ 1 } << (i + 2)) - 1;
 
 				for (int j = 0; j < steps; j++)
 				{
-					const uint64_t idx_a	= (start_IN + (2 * j + 0) * stepSize) / (8 * sizeof(uint64_t));
-					const uint64_t idx_b	= (start_IN + (2 * j + 1) * stepSize) / (8 * sizeof(uint64_t));
-
-					const uint64_t offset_a = (start_IN + (2 * j + 0) * stepSize) % (8 * sizeof(uint64_t));
-					const uint64_t offset_b = (start_IN + (2 * j + 1) * stepSize) % (8 * sizeof(uint64_t));
-
-					const uint64_t maskA = mask_in << offset_a;
-					const uint64_t maskB = mask_in << offset_b;
-					const uint64_t a = (bitField[idx_a] & maskA) >> (offset_a);
-					const uint64_t b = (bitField[idx_b] & maskB) >> (offset_b);
+					const uint64_t a = ReadValue(start_IN + (2 * j + 0) * stepSize, i + 1);
+					const uint64_t b = ReadValue(start_IN + (2 * j + 1) * stepSize, i + 1);
 					const uint64_t c = a + b;
 
-					const int idx_out			= (start_OUT + j * (stepSize + 1)) / (8 * sizeof(uint64_t));
-					const int Offset_out		= (start_OUT + j * (stepSize + 1)) % (8 * sizeof(uint64_t));
-					const uint64_t c_shifted	= c << Offset_out;
-					const uint64_t out_mask		= ~(mask_out << Offset_out);
-					const uint64_t outWord		= bitField[idx_out];
-					const uint64_t newValue		= (outWord & out_mask) | c_shifted;
-
-					bitField[idx_out] = newValue;
+					WriteValue(start_OUT + j * (stepSize + 1), i + 2, c);
 				}
 
 				stepSize += 1;
@@ -227,8 +241,9 @@ namespace FlexKit
 
 		uint HeapIndexToBitIndex(const uint k) { return k * ipow(2, maxDepth - FindMSB(k)) - ipow(2, maxDepth); }
 
-	private:
+	//private:
 		uint32_t			maxDepth	= 0;
+		uint32_t			bufferSize	= 0;
 		ResourceHandle		buffer		= InvalidHandle;
 		RenderSystem&		renderSystem;
 		Vector<uint64_t>	bitField;

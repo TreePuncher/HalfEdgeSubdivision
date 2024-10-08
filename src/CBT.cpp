@@ -151,14 +151,15 @@ namespace FlexKit
 
 	void CBTBuffer::Initialize(const CBTBufferDescription& description)
 	{
-		if (buffer)
+		if (buffer != InvalidHandle)
 			renderSystem.ReleaseResource(buffer);
 
-		auto bufferSize = GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount);
-		buffer			= renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(bufferSize));
-		maxDepth		= description.maxDepth;
+		auto size	= 1024;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
+		buffer		= renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(size));
+		maxDepth	= description.maxDepth;
+		bufferSize	= size;
 
-		bitField.resize(Max(1, bufferSize / sizeof(uint64_t)));
+		bitField.resize(Max(1, size / sizeof(uint64_t)));
 		memset(bitField.data(), 0x00, bitField.ByteSize());
 	}
 
@@ -210,7 +211,7 @@ namespace FlexKit
 			},
 			[this](InitializeCBTree& args, ResourceHandler& handler, Context& ctx, iAllocator& allocator)
 			{
-				auto upload = ctx.ReserveDirectUploadSpace(bitField.ByteSize());
+				auto upload = ctx.ReserveDirectUploadSpace(bufferSize);
 				memcpy(upload.buffer, bitField.data(), bitField.ByteSize());
 				ctx.CopyBuffer(upload, handler.CopyDest(args.buffer, ctx));
 			}
