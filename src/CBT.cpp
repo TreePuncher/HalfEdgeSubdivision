@@ -184,6 +184,8 @@ namespace FlexKit
 			},
 			[this](InitializeCBTree& args, ResourceHandler& handler, Context& ctx, iAllocator& allocator)
 			{
+				ctx.BeginEvent_DEBUG("CBTBuffer::Update");
+
 				uint32_t bufferSize = 32;
 
 				struct
@@ -220,6 +222,8 @@ namespace FlexKit
 					stepSize	+= 1;
 					steps		/= 2;
 				}
+
+				ctx.EndEvent_DEBUG();
 			});
 	}
 
@@ -288,6 +292,7 @@ namespace FlexKit
 	{
 
 	}
+
 
 }	/************************************************************************************************/
 
