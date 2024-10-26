@@ -6,6 +6,11 @@
 #include <CBT.hpp>
 #include <ModifiableShape.hpp>
 #include <ranges>
+#include <TextureUtilities.hpp>
+#include <stb_image.h>
+#include <Transforms.hpp>
+#include <TriggerComponent.hpp>
+#include <MemoryUtilities.hpp>
 
 template<typename TY> requires std::is_trivial_v<TY>
 struct AtomicVector
@@ -108,7 +113,7 @@ struct HalfEdgeMesh
 		for (const auto& face : shape.wFaces)
 			faces.emplace_back(face.edgeStart, face.GetEdgeCount(shape));
 
-		FlexKit::Vector<HEEdge> meshPoints{ IN_allocator };
+		FlexKit::Vector<XYZ> meshPoints{ IN_allocator };
 		meshPoints.resize(shape.wVertices.size());
 		for (const auto&& [idx, point] : std::views::enumerate(shape.wVertices))
 			memcpy(meshPoints.data() + idx, &point, sizeof(XYZ));
@@ -169,11 +174,36 @@ struct HalfEdgeMesh
 							Build(*renderSystem);
 					});
 
+				IN_renderSystem.RegisterPSOLoader(
+					RenderFaces,
+					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
+					{
+						return FlexKit::PipelineBuilder{ allocator }.
+							AddMeshShader("MeshMain",	"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
+							AddPixelShader("PMain",		"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
+							AddRasterizerState({ .fill = FlexKit::EFillMode::WIREFRAME, .CullMode = FlexKit::ECullMode::NONE }).
+							AddRenderTargetState(
+								{	.targetCount	= 1,
+									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).
+							Build(*renderSystem);
+					});
+
 				IN_renderSystem.QueuePSOLoad(FaceInitiate);
 				IN_renderSystem.QueuePSOLoad(EdgeUpdate);
+				IN_renderSystem.QueuePSOLoad(RenderFaces);
 
 				return true;
 			}();
+	}
+
+	~HalfEdgeMesh()
+	{
+		FlexKit::RenderSystem::globalInstance->ReleaseResource(controlFaces);
+		FlexKit::RenderSystem::globalInstance->ReleaseResource(controlCage);
+		FlexKit::RenderSystem::globalInstance->ReleaseResource(levels[0]);
+		FlexKit::RenderSystem::globalInstance->ReleaseResource(levels[1]);
+		FlexKit::RenderSystem::globalInstance->ReleaseResource(points[0]);
+		FlexKit::RenderSystem::globalInstance->ReleaseResource(points[1]);
 	}
 
 	void BuildSubDivLevel(FlexKit::FrameGraph& frameGraph)
@@ -216,7 +246,7 @@ struct HalfEdgeMesh
 					subDivData.outputVerts		= builder.NonPixelShaderResource(points[levelsBuilt]);
 					subDivData.counters			= builder.AcquireVirtualResource(FlexKit::GPUResourceDesc::UAVResource(512), FlexKit::DASUAV);
 
-					//levelsBuilt++;
+					levelsBuilt++;
 				},
 				[this](buildLevel& subDivData, FlexKit::ResourceHandler& resources, FlexKit::Context& ctx, FlexKit::iAllocator& threadLocalAllocator)
 				{
@@ -240,10 +270,61 @@ struct HalfEdgeMesh
 		}
 	}
 
+	void DrawSubDivLevel_DEBUG(FlexKit::FrameGraph& frameGraph, FlexKit::CameraHandle camera, FlexKit::UpdateTask* update, FlexKit::ResourceHandle renderTarget)
+	{
+		if (levelsBuilt == 0)
+			return;
+
+		struct DrawLevel
+		{
+			FlexKit::FrameResourceHandle renderTarget;
+			FlexKit::FrameResourceHandle inputCage;
+			FlexKit::FrameResourceHandle inputVerts;
+		};
+
+		frameGraph.AddNode<DrawLevel>(
+			{},
+			[&](FlexKit::FrameGraphNodeBuilder& builder, DrawLevel& visData)
+			{
+				if (update)
+					builder.AddDataDependency(*update);
+
+				visData.renderTarget	= builder.RenderTarget(renderTarget);
+				visData.inputCage		= builder.NonPixelShaderResource(levels[levelsBuilt - 1]);
+				visData.inputVerts		= builder.NonPixelShaderResource(points[levelsBuilt - 1]);
+			},
+			[this, camera](DrawLevel& visData, FlexKit::ResourceHandler& resources, FlexKit::Context& ctx, FlexKit::iAllocator& threadLocalAllocator)
+			{
+				ctx.BeginEvent_DEBUG("Draw HE Mesh");
+
+				FlexKit::RenderTargetList renderTargets = { resources.RenderTarget(visData.renderTarget, ctx) };
+				ctx.SetGraphicsPipelineState(RenderFaces, threadLocalAllocator);
+				ctx.SetGraphicsShaderResourceView(0, resources.NonPixelShaderResource(visData.inputCage, ctx));
+				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(visData.inputVerts, ctx));
+
+				struct {
+					FlexKit::float4x4_GPU	PV;
+					uint32_t				patchCount;
+				}	constants{
+						.PV			= FlexKit::GetCameraConstants(camera).PV,
+						.patchCount = edgeCount[levelsBuilt - 1] / 4
+				};
+
+				ctx.SetGraphicsConstantValue(2, 17, &constants);
+				ctx.SetScissorAndViewports(renderTargets);
+				ctx.SetRenderTargets(renderTargets);
+				ctx.DispatchMesh({ 1, 1, 1 });
+
+				ctx.EndEvent_DEBUG();
+			});
+	}
+
+
 	static constexpr FlexKit::PSOHandle EdgeUpdate		= FlexKit::PSOHandle{ GetTypeGUID(HEEdgeUpdate) };
 	static constexpr FlexKit::PSOHandle FaceInitiate	= FlexKit::PSOHandle{ GetTypeGUID(HEFaceInitiate) };
 	static constexpr FlexKit::PSOHandle FacePass		= FlexKit::PSOHandle{ GetTypeGUID(HEFacePass) };
 	static constexpr FlexKit::PSOHandle VertexUpdate	= FlexKit::PSOHandle{ GetTypeGUID(HEVertexUpdate) };
+	static constexpr FlexKit::PSOHandle RenderFaces		= FlexKit::PSOHandle{ GetTypeGUID(HERenderFaces) };
 
 
 	uint32_t					controlCageSize		= 0;
@@ -267,12 +348,15 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		complexComponent		{ in_framework.core.GetBlockMemory() },
 		tree					{ in_framework.GetRenderSystem(), in_framework.core.GetBlockMemory() },
 		runOnce					{ in_framework.core.GetBlockMemory() },
-		poolAllocator			{ in_framework.GetRenderSystem(), 64 * MEGABYTE, FlexKit::DefaultBlockSize, FlexKit::DeviceHeapFlags::UAVBuffer, in_framework.core.GetBlockMemory() }
+		poolAllocator			{ in_framework.GetRenderSystem(), 64 * MEGABYTE, FlexKit::DefaultBlockSize, FlexKit::DeviceHeapFlags::UAVBuffer, in_framework.core.GetBlockMemory() },
+		cameras					{ in_framework.core.GetBlockMemory() },
+		triggers				{ in_framework.core.GetBlockMemory(), in_framework.core.GetBlockMemory() }
 	{
+		auto& renderSystem = framework.GetRenderSystem();
 		renderWindow = FlexKit::CreateWin32RenderWindow(framework.GetRenderSystem(),
 			{
-				.height = 600,
-				.width	= 800,
+				.height = 1080,
+				.width	= 1920,
 			});
 
 		FlexKit::EventNotifier<>::Subscriber sub;
@@ -281,15 +365,11 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		renderWindow->Handler.Subscribe(sub);
 		renderWindow->SetWindowTitle("HelloWorld");
 
-		vertexBuffer = framework.GetRenderSystem().CreateVertexBuffer(512, false);
+		vertexBuffer = renderSystem.CreateVertexBuffer(512, false);
 
-		framework.GetRenderSystem().RegisterPSOLoader(FlexKit::DRAW_PSO,
-			[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
-			{
-				return FlexKit::CreateDrawTriStatePSO(renderSystem, allocator);
-			});
+		renderSystem.RegisterPSOLoader(FlexKit::DRAW_PSO, FlexKit::CreateDrawTriStatePSO);
 
-		const uint32_t depth = 10;
+		const uint32_t depth = 18;
 		tree.Initialize({ .maxDepth = depth });
 
 		uint32_t expectedSum = 0;
@@ -306,25 +386,26 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		FlexKit::ModifiableShape shape{ framework.core.GetBlockMemory() };
 
 		const uint32_t face0[] = {
-			shape.AddVertex({ -1, -1, 0 }),
-			shape.AddVertex({  0,  1, 0 }),
-			shape.AddVertex({  0, -1, 0 }) };
-		//
-		//const uint32_t face1[] = {
-		//	face0[2], face0[1],
-		//	shape.AddVertex({  1,  1, 0 }),
-		//	shape.AddVertex({  1, -1, 0 })
-		//};
+			shape.AddVertex({   0.0f, 0.0f, -0.9f }),
+			shape.AddVertex({  -0.9f, 0.0f,  0.0f }),
+			shape.AddVertex({   0.0f, 0.0f,  0.9f }) 
+		};
+		
+		const uint32_t face1[] = {
+			face0[0], face0[2],
+			shape.AddVertex({  0.9f, 0.0f,  0.9f }),
+			shape.AddVertex({  0.9f, 0.0f, -0.9f })
+		};
 
 		//const uint32_t face2[] = {
-		//	shape.AddVertex({ -1, 1, 0 }),
-		//	shape.AddVertex({  1,  1, 0 }),
-		//	shape.AddVertex({  1, -1, 0 }),
-		//	shape.AddVertex({ -1, -1, 0 })
+		//	shape.AddVertex({ -0.9f,  0.9f, 0 }),
+		//	shape.AddVertex({  0.9f,  0.9f, 0 }),
+		//	shape.AddVertex({  0.9f, -0.9f, 0 }),
+		//	shape.AddVertex({ -0.9f, -0.9f, 0 })
 		//};
 
 		shape.AddPolygon(face0, face0 + 3);
-		//shape.AddPolygon(face1, face1 + 4);
+		shape.AddPolygon(face1, face1 + 4);
 		//shape.AddPolygon(face2, face2 + 4);
 
 		HEMesh = std::make_unique<HalfEdgeMesh>(
@@ -337,6 +418,51 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			{
 				HEMesh->BuildSubDivLevel(frameGraph);
 			});
+
+		auto& cameraNode	= camera.AddView<FlexKit::SceneNodeView>();
+		auto& cameraView	= camera.AddView<FlexKit::CameraView>();
+
+		cameraNode.Pitch(FlexKit::pi / -6);
+		cameraNode.TranslateWorld({ -2.5f, 2.5, 5 });
+		cameraView.SetCameraNode(cameraNode);
+		cameraView.SetCameraFOV(FlexKit::pi / 3);
+		cameraView.SetCameraAspectRatio(1080.0f / 1920.0f);
+
+		activeCamera = cameraView;
+
+		int width, height, channels;
+		auto heightValues = stbi_loadf("assets\\HeightMap.png", &width, &height, &channels, 1);
+		
+		FlexKit::uint2 wh{ width, height };
+		size_t rowPitch		= FlexKit::AlignedSize(width * 4);
+		size_t bufferSize	= rowPitch * height;
+
+		FlexKit::TextureBuffer converted{ wh, 4, bufferSize, FlexKit::SystemAllocator };
+
+		//FlexKit::TextureBuffer buffer							{ wh, 4, bufferSize , FlexKit::SystemAllocator };
+		FlexKit::TextureBuffer buffer					{ wh, (std::byte*)heightValues, 4 };
+		FlexKit::TextureBufferView<float> inputView		{ buffer };
+		FlexKit::TextureBufferView<float> outputView	{ converted, rowPitch };
+
+		memset(converted.Buffer, 0, converted.BufferSize());
+
+		for (size_t y_itr = 0; y_itr < wh[1]; y_itr++)
+		{
+			for (size_t x_itr = 0; x_itr < wh[0]; x_itr++)
+			{
+				FlexKit::uint2 px	= { x_itr, y_itr };
+				outputView[px]		= inputView[px];
+			}
+		}
+
+		if (!heightValues)
+			throw std::runtime_error("Failed to load Height Map!");
+		
+		heightMap = FlexKit::LoadTexture(&converted, renderSystem.GetImmediateCopyQueue(), renderSystem, framework.core.GetBlockMemory(), FlexKit::DeviceFormat::R32_FLOAT);
+
+		auto descAllocation = renderSystem._AllocateDescriptorRange(1);
+		textureDesc = descAllocation.value();
+		FlexKit::PushTextureToDescHeap(renderSystem, DXGI_FORMAT_R32_FLOAT, (uint32_t)0u, heightMap, textureDesc);
 	}
 
 
@@ -406,7 +532,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 	}
 
 
-	void DebugVisCBTTree(FlexKit::UpdateTask* update, FlexKit::EngineCore& core, FlexKit::UpdateDispatcher& dispatcher, double dT, FlexKit::FrameGraph& frameGraph)
+	void DebugVisCBTTree(FlexKit::CameraHandle camera, FlexKit::UpdateTask* update, FlexKit::EngineCore& core, FlexKit::UpdateDispatcher& dispatcher, double dT, FlexKit::FrameGraph& frameGraph)
 	{
 		struct CBTDebugVis
 		{
@@ -419,29 +545,36 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			},
 			[&](FlexKit::FrameGraphNodeBuilder& builder, CBTDebugVis& debugVis)
 			{
+				if (update)
+					builder.AddDataDependency(*update);
+
 				builder.Requires(FlexKit::DRAW_PSO);
 				debugVis.renderTarget	= builder.RenderTarget(renderWindow->GetBackBuffer());
 				debugVis.cbtBuffer		= builder.UnorderedAccess(tree.GetBuffer());
 			},
-			[&](CBTDebugVis& debugVis, FlexKit::ResourceHandler& resources, FlexKit::Context& ctx, FlexKit::iAllocator& threadLocalAllocator)
+			[&, camera](CBTDebugVis& debugVis, FlexKit::ResourceHandler& resources, FlexKit::Context& ctx, FlexKit::iAllocator& threadLocalAllocator)
 			{
 				ctx.BeginEvent_DEBUG("DebugVisCBTTree");
 
 				struct {
-					uint32_t maxDepth;
+					FlexKit::float4x4_GPU	PV;
+					uint32_t				maxDepth;
 				} constants{
-					.maxDepth = tree.GetMaxDepth()
+					.PV			= FlexKit::GetCameraConstants(camera).PV,
+					.maxDepth	= tree.GetMaxDepth(),
 				};
 				
 				ctx.SetComputePipelineState(FlexKit::UpdateCBTTree, threadLocalAllocator);
 				ctx.SetComputeUnorderedAccessView(0, resources.UAV(debugVis.cbtBuffer, ctx));
-				ctx.SetComputeConstantValue(1, sizeof(constants) / 4, &constants);
+				ctx.SetComputeConstantValue(1, 1, &constants.maxDepth);
 				ctx.Dispatch({ 1, 1, 1 });
 				
 				ctx.AddUAVBarrier(resources.UAV(debugVis.cbtBuffer, ctx));
+
 				ctx.SetGraphicsPipelineState(FlexKit::DrawCBTTree, threadLocalAllocator);
 				ctx.SetGraphicsUnorderedAccessView(0, resources.UAV(debugVis.cbtBuffer, ctx));
-				ctx.SetGraphicsConstantValue(1, sizeof(constants) / 4, &constants);
+				ctx.SetGraphicsConstantValue(1, 17, &constants);
+				ctx.SetGraphicsDescriptorTable(2, textureDesc);
 				
 				FlexKit::RenderTargetList renderTargets = { resources.RenderTarget(debugVis.renderTarget, ctx) };
 				ctx.SetScissorAndViewports(renderTargets);
@@ -467,8 +600,19 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		runOnce.Process(frameGraph);
 
 		//gpuMemoryManager.DrawDebugVIS(frameGraph, renderWindow->GetBackBuffer());
+		
+		FlexKit::Yaw(camera, dT * FlexKit::pi / 4.0f);
+		FlexKit::MarkCameraDirty(activeCamera);
 
-		DebugVisCBTTree(nullptr, core, dispatcher, dT, frameGraph);
+		auto& transformUpdate	= FlexKit::QueueTransformUpdateTask(dispatcher);
+		auto& cameraUpdate		= cameras.QueueCameraUpdate(dispatcher);
+
+		cameraUpdate.AddInput(transformUpdate);
+
+		DebugVisCBTTree(activeCamera, &cameraUpdate, core, dispatcher, dT, frameGraph);
+
+		//if(HEMesh && activeCamera != FlexKit::InvalidHandle)
+		//	HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer());
 
 		FlexKit::PresentBackBuffer(frameGraph, renderWindow->GetBackBuffer());
 
@@ -490,17 +634,26 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 	FlexKit::RunOnceQueue<void (FlexKit::FrameGraph&)>	runOnce;
 
-	FlexKit::GameObject			gameObjects[512];
+	FlexKit::CameraComponent		cameras;
+	FlexKit::SceneNodeComponent		nodes;
+	FlexKit::TriggerComponent		triggers;
 
 	FlexKit::CBTBuffer				tree;
 	TestComponent					testComponent;
 	TestMultiFieldComponent			complexComponent;
+	FlexKit::ResourceHandle			heightMap	= FlexKit::InvalidHandle;
 
 	std::unique_ptr<HalfEdgeMesh>	HEMesh;
 
 	FlexKit::MemoryPoolAllocator	poolAllocator;
 	FlexKit::VertexBufferHandle		vertexBuffer;
 	FlexKit::Win32RenderWindow*		renderWindow = nullptr;
+
+	FlexKit::CameraHandle		activeCamera = FlexKit::InvalidHandle;
+	FlexKit::GameObject			gameObjects[512];
+	FlexKit::GameObject			camera;
+
+	FlexKit::DescriptorRange	textureDesc;
 };
 
 

@@ -91,6 +91,183 @@ namespace FlexKit
 	/************************************************************************************************/
 
 
+	uint32_t CBTBuffer::Depth(uint32_t Bit) const
+	{
+		return maxDepth - log2(Bit + 1);
+	}
+
+
+	/************************************************************************************************/
+
+	uint32_t CBTBuffer::BitToHeapIndex(uint32_t x) const noexcept
+	{
+		return 0;
+	}
+
+
+	/************************************************************************************************/
+
+
+	uint64_t CBTBuffer::GetBitOffset(uint64_t idx) const noexcept
+	{
+		const uint64_t d_k		= log2(idx);
+		const uint64_t N_d_k	= maxDepth - d_k + 1;
+		const uint64_t X_k		= ipow(2, d_k + 1) + idx * N_d_k;
+
+		return X_k;
+	}
+
+	/************************************************************************************************/
+
+	uint64_t CBTBuffer::GetHeapValue(uint32_t heapIdx) const noexcept
+	{
+		const uint32_t bitIdx	= GetBitOffset(heapIdx);
+		const uint32_t bitWidth = maxDepth - FindMSB(heapIdx) + 1;
+		return ReadValue(bitIdx, bitWidth);
+	}
+
+
+	/************************************************************************************************/
+
+
+	uint32_t CBTBuffer::DecodeNode(int32_t leafID) const noexcept
+	{
+		uint32_t heapID = 1;
+		uint32_t value	= GetHeapValue(heapID);
+
+		for (int i = 0; i < maxDepth; i++)
+		{
+			if (value > 1)
+			{
+				uint32_t temp = GetHeapValue(2 * heapID);
+				if (leafID < temp)
+				{
+					heapID *= 2;
+					value = temp;
+				}
+				else
+				{
+					leafID = leafID - temp;
+					heapID = 2 * heapID + 1;
+					value = GetHeapValue(heapID);
+				}
+			}
+			else
+				break;
+		}
+
+		return heapID;
+	}
+
+
+	/************************************************************************************************/
+
+
+	void CBTBuffer::SetBit(uint64_t idx, bool b) noexcept
+	{
+		const uint64_t bitIdx		= GetBitOffset(ipow(2, maxDepth) + idx);
+		const uint64_t wordIdx		= bitIdx / (8 * sizeof(uint64_t));
+		const uint64_t bitOffset	= bitIdx % (8 * sizeof(uint64_t)); 
+
+		const uint64_t bits		= bitField[wordIdx];
+		const uint64_t mask		= ~(uint64_t{ 1} << bitOffset);
+		const uint64_t newValue = (bits & mask) | ((b ? uint64_t{ 0x01 } : uint64_t{ 0x00 }) << bitOffset);
+
+		bitField[wordIdx] = newValue;
+	}
+
+
+	/************************************************************************************************/
+
+
+	uint64_t CBTBuffer::GetBit(uint64_t idx, bool b) const noexcept
+	{
+		auto bitIdx			= (maxDepth) * ipow(2, maxDepth) + idx;
+		auto wordIdx		= bitIdx / (8 * sizeof(uint64_t));
+		auto bitOffset		= bitIdx % (8 * sizeof(uint64_t));
+
+		const uint64_t bits = bitField[wordIdx];
+		return bits & (0x01 << bitOffset);
+	}
+
+
+	/************************************************************************************************/
+
+
+	uint64_t CBTBuffer::ReadValue(uint64_t start, uint64_t bitWidth) const noexcept
+	{
+		const uint64_t	mask	= (uint64_t(1) << (bitWidth)) - 1;
+		const uint64_t	idx		= start / 64;
+		const uint64_t	offset	= start % 64;
+
+		uint64_t value	= (bitField[idx] >> offset) & mask;
+		if (((start % 64) + bitWidth) > 64)
+		{
+			uint32_t bitsRemaining = ((start % 64) + bitWidth) % 64;
+			uint64_t remainingBits = bitField[idx + 1] << (bitWidth - bitsRemaining);
+
+			value |= (remainingBits & mask);
+		}
+
+		return value;
+	}
+
+
+	/************************************************************************************************/
+
+
+	void CBTBuffer::WriteValue(uint64_t start, uint64_t bitWidth, uint64_t value) noexcept
+	{
+		const uint64_t	idx		= start / 64;
+		const uint64_t	offset	= start % 64;
+		uint64_t		mask	= ~(((uint64_t(1) << (bitWidth)) - 1) << offset);
+
+		auto QWord = (bitField[idx] & mask) | (~mask & (value << offset));
+		bitField[idx] = QWord;
+
+		if (((start % 64) + bitWidth) > 64)
+		{
+			const uint32_t bitsRemaining	= ((start % 64) + bitWidth) % 64;
+			const uint64_t remainingBits	= value >> (bitWidth - bitsRemaining);
+			const uint64_t mask				= ~(((uint64_t(1) << (bitWidth)) - 1) >> (bitWidth - bitsRemaining));
+
+			bitField[idx + 1] = remainingBits | (bitField[idx + 1] & mask);
+		}
+	}
+
+
+	/************************************************************************************************/
+
+
+	void CBTBuffer::SumReduction() noexcept
+	{
+		const int	end			= maxDepth;
+		uint64_t	stepSize	= 1;
+		uint64_t	steps		= ipow(2, maxDepth - 1);
+			
+		for (uint64_t i = 0; i < end; i++)
+		{
+			const uint64_t start_IN		= GetBitOffset(ipow(2, maxDepth - 0 - i));
+			const uint64_t start_OUT	= GetBitOffset(ipow(2, maxDepth - 1 - i));
+
+			for (int j = 0; j < steps; j++)
+			{
+				const uint64_t a = ReadValue(start_IN + (2 * j + 0) * stepSize, i + 1);
+				const uint64_t b = ReadValue(start_IN + (2 * j + 1) * stepSize, i + 1);
+				const uint64_t c = a + b;
+
+				WriteValue(start_OUT + j * (stepSize + 1), i + 2, c);
+			}
+
+			stepSize += 1;
+			steps /= 2;
+		}
+	}
+
+
+	/************************************************************************************************/
+
+
 	void CBTBuffer::PipelineStates::_InitializeStates(PipelineStates& states, RenderSystem& renderSystem)
 	{
 		renderSystem.RegisterPSOLoader(
@@ -108,7 +285,7 @@ namespace FlexKit
 						AddInputTopology(ETopology::EIT_TRIANGLE).
 						AddVertexShader("DrawCBT_VS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl").
 						AddPixelShader("DrawCBT_PS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl").
-						AddRasterizerState({ .fill = EFillMode::SOLID, .CullMode = ECullMode::NONE }).
+						AddRasterizerState({ .fill = EFillMode::WIREFRAME, .CullMode = ECullMode::NONE }).
 						AddRenderTargetState(
 							{	.targetCount	= 1, 
 								.targetFormats	= { DeviceFormat::R16G16B16A16_FLOAT } }).
@@ -154,7 +331,7 @@ namespace FlexKit
 		if (buffer != InvalidHandle)
 			renderSystem.ReleaseResource(buffer);
 
-		auto size	= 4096 * 4;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
+		auto size	= 4096 * 32;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
 		buffer		= renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(size));
 		maxDepth	= description.maxDepth;
 		bufferSize	= size;

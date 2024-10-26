@@ -2,18 +2,23 @@
 
 #define RS_DEBUGVIS "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT),"\
 			"UAV(u0),"\
-			"RootConstants(num32BitConstants=1, b0)"
+			"RootConstants(num32BitConstants=17, b0),"\
+			"DescriptorTable(SRV(t0)),"\
+			"StaticSampler(s0, filter=FILTER_MIN_MAG_MIP_LINEAR)"
 
 cbuffer constants : register(b)
 {
+	float4x4 PV;
 	uint32_t maxDepth;
 }
 
-RWStructuredBuffer<uint32_t> CBTBuffer : register(u0);
+RWStructuredBuffer<uint32_t>	CBTBuffer : register(u0);
+Texture2D<float>				heightMap : register(t0);
+sampler							bilinear  : register(s0);
 
 struct Vertex
 {
-	float3	color		: COLOR;
+	float2	texcoord	: texcoord;
 	float4	position	: SV_Position;
 	uint	heapID		: ID;
 };
@@ -38,11 +43,18 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 	const uint tid = (vertexID / 3);
 	const float a = 9.0f / 16.0f;
 	
-	float3x3 t =
+	float3x3 points =
 	{
-		float3(-a * 0.9f,  0.9f, 0.1f),
-		float3(-a * 0.9f, -0.9f, 0.1f),
-		float3( a * 0.9f, -0.9f, 0.1f),
+		float3(-a * 0.9f, 0.0f,  0.9f),
+		float3(-a * 0.9f, 0.0f, -0.9f),
+		float3( a * 0.9f, 0.0f, -0.9f),
+	};
+	
+	float3x3 UVs =
+	{
+		float3(0.0f, 1.0f, 0.0f),
+		float3(0.0f, 0.0f, 0.0f),
+		float3(1.0f, 0.0f, 0.0f),
 	};
 	
 	float3x3 m =
@@ -60,17 +72,22 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 		m = mul(M_b[idx], m);
 	}
 
-	const float3x3 tri = mul(m, t);
+	const float3x3 tri	= mul(m, points);
+	const float3x3 UV	= mul(m, UVs);
+	const float2   uv	= UV[vertexID % 3].xy;
+	const float    h	= 0.1f * sqrt(heightMap.SampleLevel(bilinear, uv, 0)) - 0.75f;
+	const float3 pos	= float3(tri[vertexID % 3].x, h, tri[vertexID % 3].z);
 	
 	Vertex OUT;
-	OUT.position = float4(tri[vertexID % 3].xyz, 1);
-	OUT.color    = colors[d % 3];
-	OUT.heapID	 = heapID;
+	OUT.position	= mul(PV, float4(pos * 10, 1));
+	OUT.texcoord	= uv;
+	OUT.heapID		= heapID;
+	
 	return OUT;
 }
 
 
 float4 DrawCBT_PS(Vertex v) : SV_Target
 {
-	return float4(v.color, 1);
+	return float4(float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
 }

@@ -51,17 +51,17 @@ void FacePassInitiate(const uint threadID : SV_DispatchThreadID)
 		HalfEdge he = halfEdge[edgeItr];
 		
 		HalfEdge edge0;
-		edge0.twin = (he.twin != -1) ? he.twin * 4 : -1;
+		edge0.twin = (he.twin != -1) ? (halfEdge[he.twin].next * 4 + 3) : -1;
 		edge0.next = outputIdx + 1;
 		edge0.prev = outputIdx + 3;
-		edge0.vert = idx + 0;
+		edge0.vert = idx + 2 * i + 0;
 		outputStructure[outputIdx + 0] = edge0;
 
 		HalfEdge edge1;
 		edge1.twin = ((beginCount.x + beginCount.y + i + 1) % beginCount.y) * 4 + 2;
 		edge1.next = outputIdx + 2;
 		edge1.prev = outputIdx + 0;
-		edge1.vert = idx + 1;
+		edge1.vert = idx + 2 * i + 1;
 		outputStructure[outputIdx + 1] = edge1;
 		
 		HalfEdge edge2;
@@ -72,14 +72,18 @@ void FacePassInitiate(const uint threadID : SV_DispatchThreadID)
 		outputStructure[outputIdx + 2] = edge2;
 		
 		HalfEdge edge3;
-		edge3.twin = (he.twin != -1) ? he.twin * 4 : -1;
+		edge3.twin = (he.twin != -1) ? (halfEdge[he.prev].twin * 4 + 3) : -1;
 		edge3.next = outputIdx + 0;
 		edge3.prev = outputIdx + 2;
-		edge3.vert = idx + 2;
+		edge3.vert = idx + (vertexCount - 2 + 2 * i) % (vertexCount - 1);
 		outputStructure[outputIdx + 3] = edge3;
 
 		facePoint  += inputVerts[he.vert];
 		edgeItr		= he.next;
+		
+		vertexPoints[idx + 2 * i + 0] = inputVerts[he.vert];
+		vertexPoints[idx + 2 * i + 1] = (inputVerts[he.vert] + inputVerts[halfEdge[he.next].vert]) / 2;
+		
 		i++;
 		
 		if(i > 32)
