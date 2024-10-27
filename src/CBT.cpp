@@ -285,7 +285,7 @@ namespace FlexKit
 						AddInputTopology(ETopology::EIT_TRIANGLE).
 						AddVertexShader("DrawCBT_VS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl").
 						AddPixelShader("DrawCBT_PS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl").
-						AddRasterizerState({ .fill = EFillMode::WIREFRAME, .CullMode = ECullMode::NONE }).
+						AddRasterizerState({ .fill = EFillMode::SOLID, .CullMode = ECullMode::BACK}).
 						AddRenderTargetState(
 							{	.targetCount	= 1, 
 								.targetFormats	= { DeviceFormat::R16G16B16A16_FLOAT } }).
@@ -331,7 +331,7 @@ namespace FlexKit
 		if (buffer != InvalidHandle)
 			renderSystem.ReleaseResource(buffer);
 
-		auto size	= 4096 * 32;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
+		auto size	= 4096 * 64;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
 		buffer		= renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(size));
 		maxDepth	= description.maxDepth;
 		bufferSize	= size;

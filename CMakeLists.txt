@@ -22,7 +22,6 @@ file (GLOB HPP_FILES includes/*.hpp)
 add_executable(
 	TestApp
 	${CPP_FILES}
-	"src/CBT.cpp"
 )
 
 target_include_directories(
