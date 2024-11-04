@@ -26,13 +26,7 @@ struct Vertex
 
 [RootSignature(RS_DEBUGVIS)]
 Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
-{
-	static const float3x3 M_b[] =
-	{
-		M0(),
-		M1()
-	};
-	
+{	
 	const uint tid = (vertexID / 3);
 	const float a = 9.0f / 16.0f;
 	
@@ -52,19 +46,12 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 		float3(1.0f, 1.0f, 0.0f),
 	};
 	
-	float3x3 m =
-		float3x3(
-			1, 0, 0, 
-			0, 1, 0, 
-			0, 0, 1);
-	
 	const uint heapID	= DecodeNode(CBTBuffer, maxDepth, tid);
-	const uint d		= FindMSB(heapID);
 	
 	float3x3 points;
 	float3x3 UVs;
 	
-	if (GetBitValue(heapID, d - 1) != 0)
+	if (GetBitValue(heapID, FindMSB(heapID) - 1) != 0)
 	{
 		points = 
 			float3x3(
@@ -92,13 +79,8 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 				IN_texcoord[3],
 				IN_texcoord[0]);
 	}
-	
-	for (int bitID = d - 2; bitID >= 0; --bitID)
-	{
-		int idx = GetBitValue(heapID, bitID);
-		m = mul(M_b[idx], m);
-	}
 
+	const float3x3 m	= GetLEBMatrix(heapID);
 	const float3x3 tri	= mul(m, points);
 	const float3x3 UV	= mul(m, UVs);
 	const float2   uv	= UV[vertexID % 3].xy;

@@ -51,7 +51,7 @@ uint ipow(in uint base, in uint exp)
 }
 
 
-uint32_t GetBitOffset(in uint32_t maxDepth, uint32_t idx)
+uint32_t GetBitOffset(uint32_t idx, in uint32_t maxDepth)
 {
 	const uint32_t d_k		= FindMSB(idx);
 	const uint32_t N_d_k	= maxDepth - d_k + 1;
@@ -101,10 +101,22 @@ void WriteValue(in RWStructuredBuffer<uint> CBTBuffer, uint32_t start, uint32_t 
 }
 
 
+void SetBit(in RWStructuredBuffer<uint> CBTBuffer, uint32_t bitIdx, bool bit, uint32_t maxDepth)
+{
+	const uint64_t bitArrayOffset	= GetBitOffset(ipow(2, maxDepth), maxDepth);
+	const uint32_t wordIdx			= (bitArrayOffset + bitIdx) / (8 * sizeof(uint32_t));
+	const uint32_t bitOffset		= (bitArrayOffset + bitIdx) % (8 * sizeof(uint32_t));
+	const uint32_t mask				= 0x01 << bitOffset;
+	
+	InterlockedAnd(CBTBuffer[wordIdx], ~mask);
+	InterlockedOr(CBTBuffer[wordIdx], mask & (bit ? 0xffffffffffff : 0x0000000000000000));
+}
+
+
 template<typename TY>
 uint32_t GetHeapValue(in TY CBTBuffer, in uint32_t maxDepth, uint32_t heapIdx)
 {
-	const uint32_t bitIdx	= GetBitOffset(maxDepth, heapIdx);
+	const uint32_t bitIdx	= GetBitOffset(heapIdx, maxDepth);
 	const uint32_t bitWidth = maxDepth - FindMSB(heapIdx) + 1;
 	return ReadValue(CBTBuffer, bitIdx, bitWidth);
 }
@@ -144,6 +156,73 @@ uint32_t DecodeNode(in TY CBTBuffer, in uint32_t maxDepth, int32_t leafID)
 bool GetBitValue(in uint heapID, in uint bitID)
 {
 	return (heapID >> bitID) & 0x01;
+}
+
+
+float3x3 GetLEBMatrix(in const uint heapID)
+{
+	static const float3x3 M_b[] =
+	{
+		M0(),
+		M1()
+	};
+	
+	float3x3 m =
+		float3x3(
+			1, 0, 0,
+			0, 1, 0,
+			0, 0, 1);
+	
+	const uint d = FindMSB(heapID);
+	for (int bitID = d - 2; bitID >= 0; --bitID)
+	{
+		int idx = GetBitValue(heapID, bitID);
+		m = mul(M_b[idx], m);
+	}
+	
+	return m;
+}
+
+
+uint rule(uint n)
+{
+	return n == 1 ? n : n;
+}
+
+
+uint4 GetNeighbors0(in const uint4 n)
+{
+	return uint4(rule(2 * n.w + 1), rule(2 * n.z + 1), rule(2 * n.y + 1), 2 * n.w);
+}
+
+
+uint4 GetNeighbors1(in const uint4 n)
+{
+	return uint4(rule(2 * n.z), rule(2 * n.w + 1), rule(2 * n.x), 2 * n.w + 1);
+}
+
+
+uint4 LebNeighbors(in const uint heapID)
+{
+	const uint	d = FindMSB(heapID);
+	uint4		n = uint4(0, 0, 0, 1);
+	
+	for (int bitID = d - 2; bitID >= 0; --bitID)
+	{
+		uint b = GetBitValue(heapID, bitID);
+		if (b == 0)
+			n = GetNeighbors0(n);
+		else 
+			n = GetNeighbors1(n);
+	}
+	
+	return n;
+}
+
+
+uint32_t HeapToBitIndex(uint32_t k, uint32_t maxDepth) 
+{
+	return k * ipow(2, maxDepth - FindMSB(k)) - ipow(2, maxDepth);
 }
 
 

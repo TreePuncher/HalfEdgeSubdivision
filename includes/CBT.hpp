@@ -102,7 +102,7 @@ namespace FlexKit
 		inline static PipelineStates states;
 
 		uint32_t Depth(uint32_t Bit) const;
-		uint32_t BitToHeapIndex(uint32_t x) const noexcept;
+		uint32_t HeapToBitIndex(uint32_t x) const noexcept;
 		uint64_t GetBitOffset(uint64_t idx) const noexcept;
 
 		uint64_t GetHeapValue(uint32_t heapIdx) const noexcept;

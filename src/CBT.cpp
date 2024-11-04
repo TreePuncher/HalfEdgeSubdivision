@@ -99,9 +99,9 @@ namespace FlexKit
 
 	/************************************************************************************************/
 
-	uint32_t CBTBuffer::BitToHeapIndex(uint32_t x) const noexcept
+	uint32_t CBTBuffer::HeapToBitIndex(uint32_t k) const noexcept
 	{
-		return 0;
+		return k * ipow(2, maxDepth - FindMSB(k)) - ipow(2, maxDepth);
 	}
 
 
@@ -170,7 +170,7 @@ namespace FlexKit
 		const uint64_t bitOffset	= bitIdx % (8 * sizeof(uint64_t)); 
 
 		const uint64_t bits		= bitField[wordIdx];
-		const uint64_t mask		= ~(uint64_t{ 1} << bitOffset);
+		const uint64_t mask		= ~(uint64_t{1} << bitOffset);
 		const uint64_t newValue = (bits & mask) | ((b ? uint64_t{ 0x01 } : uint64_t{ 0x00 }) << bitOffset);
 
 		bitField[wordIdx] = newValue;
