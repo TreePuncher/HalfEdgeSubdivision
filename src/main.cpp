@@ -13,6 +13,8 @@
 #include <Transforms.hpp>
 #include <TriggerComponent.hpp>
 #include <Win32Graphics.hpp>
+#include <DepthBuffer.hpp>
+
 
 /************************************************************************************************/
 
@@ -68,6 +70,44 @@ struct AtomicVector
 /************************************************************************************************/
 
 
+constexpr FlexKit::PSOHandle AdaptiveTerrainUpdateArgs	= FlexKit::PSOHandle(GetTypeGUID(AdaptiveTerrainUpdateArgs));
+constexpr FlexKit::PSOHandle AdaptiveTerrainUpdate		= FlexKit::PSOHandle(GetTypeGUID(AdaptiveTerrainUpdate));
+constexpr FlexKit::PSOHandle AdaptiveTerrainDrawArgs	= FlexKit::PSOHandle(GetTypeGUID(AdaptiveTerrainDrawArgs));
+
+void RegisterAdaptiveUpdateCBT(FlexKit::RenderSystem& renderSystem)
+{
+	renderSystem.RegisterPSOLoader(
+		AdaptiveTerrainUpdateArgs,
+		[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& tempAllocator) 
+		{
+			return FlexKit::PipelineBuilder{ tempAllocator }.
+				AddComputeShader("AdaptiveUpdateGetArgs", R"(assets\shaders\CBT\CBT_GetArguments.hlsl)", { .hlsl2021 = true }).
+				Build(*renderSystem);
+		});
+
+	renderSystem.RegisterPSOLoader(
+		AdaptiveTerrainUpdate,
+		[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& tempAllocator) 
+		{
+			return FlexKit::PipelineBuilder{ tempAllocator }.
+				AddComputeShader("UpdateAdaptiveTerrain", R"(assets\shaders\CBT\CBT_TerrainAdapt.hlsl)", { .hlsl2021 = true }).
+				Build(*renderSystem);
+		});
+
+	renderSystem.RegisterPSOLoader(
+		AdaptiveTerrainDrawArgs,
+		[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& tempAllocator)
+		{
+			return FlexKit::PipelineBuilder{ tempAllocator }.
+				AddComputeShader("AdaptiveDrawGetArgs", R"(assets\shaders\CBT\CBT_GetArguments.hlsl)", { .hlsl2021 = true }).
+				Build(*renderSystem);
+		});
+
+	renderSystem.QueuePSOLoad(AdaptiveTerrainUpdateArgs);
+	renderSystem.QueuePSOLoad(AdaptiveTerrainDrawArgs);
+	renderSystem.QueuePSOLoad(AdaptiveTerrainUpdate);
+}
+
 struct CBTTerrainState : FlexKit::FrameworkState
 {
 	CBTTerrainState(FlexKit::GameFramework& in_framework) :
@@ -76,20 +116,43 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		complexComponent		{ in_framework.core.GetBlockMemory() },
 		tree					{ in_framework.GetRenderSystem(), in_framework.core.GetBlockMemory() },
 		runOnce					{ in_framework.core.GetBlockMemory() },
-		poolAllocator			{ in_framework.GetRenderSystem(), 64 * MEGABYTE, FlexKit::DefaultBlockSize, FlexKit::DeviceHeapFlags::UAVBuffer, in_framework.core.GetBlockMemory() },
+		poolAllocator			{ in_framework.GetRenderSystem(), 64 * MEGABYTE, 
+									FlexKit::DefaultBlockSize, FlexKit::DeviceHeapFlags::UAVBuffer, 
+									in_framework.core.GetBlockMemory() },
 		cameras					{ in_framework.core.GetBlockMemory() },
-		triggers				{ in_framework.core.GetBlockMemory(), in_framework.core.GetBlockMemory() }
+		triggers				{ in_framework.core.GetBlockMemory(), in_framework.core.GetBlockMemory() },
+		depthBuffer				{ in_framework.GetRenderSystem(), { 1920, 1080 } }
 	{
+		using namespace FlexKit;
+
 		auto& renderSystem = framework.GetRenderSystem();
-		renderWindow = FlexKit::CreateWin32RenderWindow(framework.GetRenderSystem(),
+		RegisterAdaptiveUpdateCBT(renderSystem);
+
+		indirectDispatchLayout = renderSystem.CreateIndirectLayout(
+			{
+				IndirectDrawDescription{ 
+					IndirectLayoutEntryType::ILE_RootDescriptorUINT, 
+					IndirectDrawDescription::Constant{ .rootParameterIdx = 3, .destinationOffset = 0, .numValues = 1 } },
+				IndirectDrawDescription{ IndirectLayoutEntryType::ILE_DispatchCall },
+			}, 
+			in_framework.core.GetBlockMemory(), std::get<1>(renderSystem.GetPSOAndRootSignature(AdaptiveTerrainUpdate, in_framework.core.GetTempMemory())));
+
+		indirectDrawLayout = renderSystem.CreateIndirectLayout(
+			{
+				IndirectDrawDescription{ IndirectLayoutEntryType::ILE_DrawCall },
+			},
+			in_framework.core.GetBlockMemory());
+
+
+		renderWindow = CreateWin32RenderWindow(framework.GetRenderSystem(),
 			{
 				.height = 1080,
 				.width	= 1920,
 			});
 
 		FlexKit::EventNotifier<>::Subscriber sub;
-		sub.Notify = &FlexKit::EventsWrapper;
-		sub._ptr = &framework;
+		sub.Notify	= &FlexKit::EventsWrapper;
+		sub._ptr	= &framework;
 		renderWindow->Handler.Subscribe(sub);
 		renderWindow->SetWindowTitle("HelloWorld");
 
@@ -97,21 +160,21 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		renderSystem.RegisterPSOLoader(FlexKit::DRAW_PSO, FlexKit::CreateDrawTriStatePSO);
 
-		const uint32_t depth = 19;
+
+		const uint32_t depth = 9;
 		tree.Initialize({ .maxDepth = depth });
 
-		uint32_t expectedSum = 0;
-		for (int i = 0; i < (1 << depth); i += 1)
-			tree.SetBit(i, true);
+		tree.SetBit(0, true);
+		tree.SetBit(1 << (depth - 1), true);
 
 		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph)
 			{
 				tree.Upload(frameGraph);
-				tree.Update(frameGraph);
+				tree.SumReduction_GPU(frameGraph);
 			});
 
 
-		FlexKit::ModifiableShape shape{ framework.core.GetBlockMemory() };
+		ModifiableShape shape{ framework.core.GetBlockMemory() };
 
 		const uint32_t face0[] = {
 			shape.AddVertex({   0.0f, 0.0f, -0.9f }),
@@ -136,7 +199,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		shape.AddPolygon(face1, face1 + 4);
 		//shape.AddPolygon(face2, face2 + 4);
 
-		HEMesh = std::make_unique<FlexKit::HalfEdgeMesh>(
+		HEMesh = std::make_unique<HalfEdgeMesh>(
 							shape,
 							framework.GetRenderSystem(), 
 							framework.core.GetBlockMemory());
@@ -147,8 +210,8 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				HEMesh->BuildSubDivLevel(frameGraph);
 			});
 
-		auto& cameraNode	= camera.AddView<FlexKit::SceneNodeView>();
-		auto& cameraView	= camera.AddView<FlexKit::CameraView>();
+		auto& cameraNode	= camera.AddView<SceneNodeView>();
+		auto& cameraView	= camera.AddView<CameraView>();
 
 		cameraNode.Pitch(FlexKit::pi / -5);
 		cameraNode.TranslateWorld({  0, 2.5, 15 });
@@ -158,39 +221,48 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		activeCamera = cameraView;
 
-		int width, height, channels;
-		auto heightValues = stbi_loadf("assets\\HeightMap.png", &width, &height, &channels, 1);
-		
-		FlexKit::uint2 wh{ width, height };
-		size_t rowPitch		= FlexKit::AlignedSize(width * 4);
-		size_t bufferSize	= rowPitch * height;
 
-		FlexKit::TextureBuffer converted{ wh, 4, bufferSize, FlexKit::SystemAllocator };
-
-		//FlexKit::TextureBuffer buffer							{ wh, 4, bufferSize , FlexKit::SystemAllocator };
-		FlexKit::TextureBuffer buffer					{ wh, (std::byte*)heightValues, 4 };
-		FlexKit::TextureBufferView<float> inputView		{ buffer };
-		FlexKit::TextureBufferView<float> outputView	{ converted, rowPitch };
-
-		memset(converted.Buffer, 0, converted.BufferSize());
-
-		for (size_t y_itr = 0; y_itr < wh[1]; y_itr++)
+		if(false)
 		{
-			for (size_t x_itr = 0; x_itr < wh[0]; x_itr++)
+			int width, height, channels;
+			auto heightValues = stbi_loadf("assets\\HeightMap.png", &width, &height, &channels, 1);
+
+			if (!heightValues)
+				throw std::runtime_error("Failed to load Height Map!");
+
+			const uint2 wh{ width, height };
+			size_t rowPitch		= FlexKit::AlignedSize(width * 4);
+			size_t bufferSize	= rowPitch * height;
+
+			TextureBuffer converted				{ wh, 4, bufferSize, FlexKit::SystemAllocator };
+			TextureBuffer buffer				{ wh, (std::byte*)heightValues, 4 };
+			TextureBufferView<float> inputView	{ buffer };
+			TextureBufferView<float> outputView	{ converted, rowPitch };
+
+			for (size_t y_itr = 0; y_itr < wh[1]; y_itr++)
 			{
-				FlexKit::uint2 px	= { x_itr, y_itr };
-				outputView[px]		= inputView[px];
+				for (size_t x_itr = 0; x_itr < wh[0]; x_itr++)
+				{
+					FlexKit::uint2 px	= { x_itr, y_itr };
+					outputView[px]		= inputView[px];
+				}
 			}
-		}
 
-		if (!heightValues)
-			throw std::runtime_error("Failed to load Height Map!");
+			free(heightValues);
+
 		
-		heightMap = FlexKit::LoadTexture(&converted, renderSystem.GetImmediateCopyQueue(), renderSystem, framework.core.GetBlockMemory(), FlexKit::DeviceFormat::R32_FLOAT);
+			heightMap = LoadTexture(&converted, renderSystem.GetImmediateCopyQueue(), renderSystem, framework.core.GetBlockMemory(), DeviceFormat::R32_FLOAT);
 
-		auto descAllocation = renderSystem._AllocateDescriptorRange(1);
-		textureDesc = descAllocation.value();
-		FlexKit::PushTextureToDescHeap(renderSystem, DXGI_FORMAT_R32_FLOAT, (uint32_t)0u, heightMap, textureDesc);
+			auto descAllocation = renderSystem._AllocateDescriptorRange(1);
+			textureDesc = descAllocation.value();
+			PushTextureToDescHeap(renderSystem, DXGI_FORMAT_R32_FLOAT, (uint32_t)0u, heightMap, textureDesc);
+		}
+		else
+		{
+			auto descAllocation = renderSystem._AllocateDescriptorRange(1);
+			textureDesc = descAllocation.value();
+			PushTextureToDescHeap(renderSystem, DXGI_FORMAT_R8G8B8A8_UNORM, (uint32_t)0u, renderSystem.DefaultTexture, textureDesc);
+		}
 	}
 
 
@@ -269,12 +341,69 @@ struct CBTTerrainState : FlexKit::FrameworkState
 	/************************************************************************************************/
 
 
-	void DebugVisCBTTree(FlexKit::CameraHandle camera, FlexKit::UpdateTask* update, FlexKit::EngineCore& core, FlexKit::UpdateDispatcher& dispatcher, double dT, FlexKit::FrameGraph& frameGraph)
+	void TerrainUpdateAdaptiveLOD(FlexKit::CameraHandle camera, FlexKit::FrameGraph& frameGraph)
 	{
+		struct CBT_UpdateAdaptiveTerrain
+		{
+			FlexKit::FrameResourceHandle indirectArgumentsBuffer;
+			FlexKit::FrameResourceHandle cbtBuffer;
+		};
+
+		frameGraph.AddNode<CBT_UpdateAdaptiveTerrain>(
+			{},
+			[&](FlexKit::FrameGraphNodeBuilder& builder, CBT_UpdateAdaptiveTerrain& args)
+			{
+				args.indirectArgumentsBuffer	= builder.AcquireVirtualResource(FlexKit::GPUResourceDesc::UAVResource(1024), FlexKit::DeviceAccessState::DASUAV);
+				args.cbtBuffer					= builder.UnorderedAccess(tree.GetBuffer());
+			},
+			[&, camera](CBT_UpdateAdaptiveTerrain& args, FlexKit::ResourceHandler& resources, FlexKit::Context& ctx, FlexKit::iAllocator& threadLocalAllocator)
+			{
+				ctx.BeginEvent_DEBUG("Update CBT Adaptive Terrain");
+				const uint32_t maxDepth = tree.GetMaxDepth();
+
+				ctx.DiscardResource(resources.GetResource(args.indirectArgumentsBuffer));
+				ctx.SetComputePipelineState(AdaptiveTerrainUpdateArgs, threadLocalAllocator);
+				ctx.SetComputeUnorderedAccessView(0, resources.GetResource(args.cbtBuffer));
+				ctx.SetComputeUnorderedAccessView(1, resources.GetResource(args.indirectArgumentsBuffer));
+				ctx.SetComputeConstantValue(2, 1, &maxDepth);
+				ctx.Dispatch({ 1, 1, 1 });
+
+				struct {
+					FlexKit::float4x4_GPU	PV;
+					uint32_t				maxDepth;
+					float					scale;
+				} constants{ 
+					.PV			= FlexKit::GetCameraConstants(camera).PV,
+					.maxDepth	= tree.GetMaxDepth(),
+					.scale		= 1
+				};
+
+				ctx.SetComputePipelineState(AdaptiveTerrainUpdate, threadLocalAllocator);
+				ctx.SetComputeUnorderedAccessView(0, resources.UAV(args.cbtBuffer, ctx));
+				ctx.SetComputeConstantValue(1, 18, &constants);
+				ctx.SetComputeDescriptorTable(2, textureDesc);
+				ctx.ExecuteIndirect(resources.IndirectArgs(args.indirectArgumentsBuffer, ctx), indirectDispatchLayout, 0);
+
+				ctx.EndEvent_DEBUG();
+			});
+
+		tree.SumReduction_GPU(frameGraph);
+	}
+
+
+	/************************************************************************************************/
+
+
+	void DebugVisCBTTree(FlexKit::CameraHandle camera, FlexKit::UpdateTask* update, FlexKit::ResourceHandle depthTarget, FlexKit::EngineCore& core, FlexKit::UpdateDispatcher& dispatcher, double dT, FlexKit::FrameGraph& frameGraph)
+	{
+		using namespace FlexKit;
+
 		struct CBTDebugVis
 		{
-			FlexKit::FrameResourceHandle renderTarget;
-			FlexKit::FrameResourceHandle cbtBuffer;
+			FrameResourceHandle renderTarget;
+			FrameResourceHandle depthTarget;
+			FrameResourceHandle cbtBuffer;
+			FrameResourceHandle indirectArgumentsBuffer;
 		};
 
 		frameGraph.AddNode<CBTDebugVis>(
@@ -286,42 +415,53 @@ struct CBTTerrainState : FlexKit::FrameworkState
 					builder.AddDataDependency(*update);
 
 				builder.Requires(FlexKit::DRAW_PSO);
-				debugVis.renderTarget	= builder.RenderTarget(renderWindow->GetBackBuffer());
-				debugVis.cbtBuffer		= builder.UnorderedAccess(tree.GetBuffer());
+				debugVis.renderTarget				= builder.RenderTarget(renderWindow->GetBackBuffer());
+				debugVis.depthTarget				= builder.DepthTarget(depthTarget);
+				debugVis.cbtBuffer					= builder.NonPixelShaderResource(tree.GetBuffer());
+				debugVis.indirectArgumentsBuffer	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DeviceAccessState::DASUAV);
 			},
-			[&, camera](CBTDebugVis& debugVis, FlexKit::ResourceHandler& resources, FlexKit::Context& ctx, FlexKit::iAllocator& threadLocalAllocator)
+			[&, camera, dT](CBTDebugVis& debugVis, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
 				ctx.BeginEvent_DEBUG("DebugVisCBTTree");
 
-				struct {
-					FlexKit::float4x4_GPU	PV;
-					uint32_t				maxDepth;
-				} constants{
-					.PV			= FlexKit::GetCameraConstants(camera).PV,
-					.maxDepth	= tree.GetMaxDepth(),
-				};
-				
-				ctx.SetComputePipelineState(FlexKit::UpdateCBTTree, threadLocalAllocator);
-				ctx.SetComputeUnorderedAccessView(0, resources.UAV(debugVis.cbtBuffer, ctx));
-				ctx.SetComputeConstantValue(1, 1, &constants.maxDepth);
-				ctx.Dispatch({ 1, 1, 1 });
-				
-				ctx.AddUAVBarrier(resources.UAV(debugVis.cbtBuffer, ctx));
+				static double t = 0.0f;
 
-				ctx.SetGraphicsPipelineState(FlexKit::DrawCBTTree, threadLocalAllocator);
-				ctx.SetGraphicsUnorderedAccessView(0, resources.UAV(debugVis.cbtBuffer, ctx));
-				ctx.SetGraphicsConstantValue(1, 17, &constants);
+				struct {
+					float4x4_GPU	PV;
+					uint32_t		maxDepth;
+					float			scale;
+				} constants{
+					.PV = GetCameraConstants(camera).PV,
+					.maxDepth = tree.GetMaxDepth(),
+					.scale = sinf(t) / 2.0f + 0.6f
+				};
+
+				ctx.DiscardResource(resources.GetResource(debugVis.indirectArgumentsBuffer));
+				ctx.SetComputePipelineState(AdaptiveTerrainDrawArgs, threadLocalAllocator);
+				ctx.SetComputeUnorderedAccessView(0, resources.UAV(debugVis.cbtBuffer, ctx));
+				ctx.SetComputeUnorderedAccessView(1, resources.UAV(debugVis.indirectArgumentsBuffer, ctx));
+				ctx.SetComputeConstantValue(2, 1, &constants.maxDepth);
+				ctx.Dispatch({ 1, 1, 1 });
+
+				if(wireframe)
+					ctx.SetGraphicsPipelineState(DrawCBTWireframe, threadLocalAllocator);
+				else
+					ctx.SetGraphicsPipelineState(DrawCBT, threadLocalAllocator);
+
+				ctx.SetGraphicsConstantValue(0, 18, &constants);
+				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(debugVis.cbtBuffer, ctx));
 				ctx.SetGraphicsDescriptorTable(2, textureDesc);
 				
-				FlexKit::RenderTargetList renderTargets = { resources.RenderTarget(debugVis.renderTarget, ctx) };
+				RenderTargetList renderTargets = { resources.RenderTarget(debugVis.renderTarget, ctx) };
 				ctx.SetScissorAndViewports(renderTargets);
-				ctx.SetInputPrimitive(FlexKit::EInputPrimitive::INPUTPRIMITIVETRIANGLELIST);
-				ctx.SetRenderTargets(renderTargets);
+				ctx.SetInputPrimitive(EInputPrimitive::INPUTPRIMITIVETRIANGLELIST);
+				ctx.SetRenderTargets(renderTargets, true, resources.DepthTarget(debugVis.depthTarget, ctx));
 
-				auto temp = tree.GetHeapValue(1);
+				ctx.ExecuteIndirect(
+					resources.IndirectArgs(debugVis.indirectArgumentsBuffer, ctx), 
+					indirectDrawLayout);
 
-				ctx.Draw(3 * (1 << tree.maxDepth));
-
+				t += dT;
 				ctx.EndEvent_DEBUG();
 			});
 	}
@@ -335,7 +475,10 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		frameGraph.AddOutput(renderWindow->GetBackBuffer());
 		frameGraph.AddMemoryPool(poolAllocator);
 
+		auto depthTarget = depthBuffer.Get();
+
 		FlexKit::ClearBackBuffer(frameGraph, renderWindow->GetBackBuffer());
+		FlexKit::ClearDepthBuffer(frameGraph, depthTarget, 1.0f);
 
 		runOnce.Process(frameGraph);
 
@@ -349,7 +492,8 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		cameraUpdate.AddInput(transformUpdate);
 
-		DebugVisCBTTree(activeCamera, &cameraUpdate, core, dispatcher, dT, frameGraph);
+		TerrainUpdateAdaptiveLOD(activeCamera, frameGraph);
+		DebugVisCBTTree(activeCamera, &cameraUpdate, depthTarget, core, dispatcher, dT, frameGraph);
 
 		//if(HEMesh && activeCamera != FlexKit::InvalidHandle)
 		//	HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer());
@@ -365,6 +509,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 	void PostDrawUpdate(FlexKit::EngineCore& core, double dT) override
 	{
+		depthBuffer.Increment();
 		renderWindow->Present(1);
 	}
 
@@ -374,8 +519,11 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 	bool EventHandler(FlexKit::Event evt) 
 	{
-		if (evt.E_SystemEvent && evt.Action == FlexKit::Event::InputAction::Exit)
+		if (evt.InputSource == evt.E_SystemEvent && evt.Action == FlexKit::Event::InputAction::Exit)
 			framework.quit = true;
+
+		if (evt.InputSource == FlexKit::Event::Keyboard && evt.mData1.mKC[0] == FlexKit::KC_SPACE && evt.Action == FlexKit::Event::Release)
+			wireframe = !wireframe;
 
 		return false; 
 	}
@@ -389,19 +537,24 @@ struct CBTTerrainState : FlexKit::FrameworkState
 	FlexKit::CBTBuffer				tree;
 	TestComponent					testComponent;
 	TestMultiFieldComponent			complexComponent;
-	FlexKit::ResourceHandle			heightMap	= FlexKit::InvalidHandle;
 
+	FlexKit::IndirectLayout			indirectDispatchLayout;
+	FlexKit::IndirectLayout			indirectDrawLayout;
+	FlexKit::ResourceHandle			heightMap		= FlexKit::InvalidHandle;
 	std::unique_ptr<FlexKit::HalfEdgeMesh>	HEMesh;
 
 	FlexKit::MemoryPoolAllocator	poolAllocator;
 	FlexKit::VertexBufferHandle		vertexBuffer;
 	FlexKit::Win32RenderWindow*		renderWindow = nullptr;
+	FlexKit::DepthBuffer			depthBuffer;
 
 	FlexKit::CameraHandle		activeCamera = FlexKit::InvalidHandle;
 	FlexKit::GameObject			gameObjects[512];
 	FlexKit::GameObject			camera;
 
 	FlexKit::DescriptorRange	textureDesc;
+
+	bool	wireframe = false;
 };
 
 

@@ -1,19 +1,20 @@
 #include "CBT.hlsl"
 
 #define RS_DEBUGVIS "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT),"\
-			"UAV(u0),"\
-			"RootConstants(num32BitConstants=17, b0),"\
-			"DescriptorTable(SRV(t0)),"\
+			"RootConstants(num32BitConstants=18, b0),"\
+			"SRV(t0),"\
+			"DescriptorTable(SRV(t1)),"\
 			"StaticSampler(s0, filter=FILTER_MIN_MAG_MIP_LINEAR, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP)"
 
 cbuffer constants : register(b)
 {
 	float4x4 PV;
 	uint32_t maxDepth;
+	float	 scale;
 }
 
-RWStructuredBuffer<uint32_t>	CBTBuffer : register(u0);
-Texture2D<float>				heightMap : register(t0);
+StructuredBuffer<uint32_t>		CBTBuffer : register(t0);
+Texture2D<float>				heightMap : register(t1);
 sampler							bilinear  : register(s0);
 
 struct Vertex
@@ -101,12 +102,12 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 	const float3x3 tri	= mul(m, points);
 	const float3x3 UV	= mul(m, UVs);
 	const float2   uv	= UV[vertexID % 3].xy;
-	const float    h	= 0.1f * sqrt(heightMap.SampleLevel(bilinear, uv, 0)) - 0.75f;
-	const float3 pos	= float3(tri[vertexID % 3].x, h, tri[vertexID % 3].z);
+	const float    h	= 0.0f * sqrt(heightMap.SampleLevel(bilinear, uv, 0)) - 1.0f;
+	const float3 pos	= float3(tri[vertexID % 3].x, h, tri[vertexID % 3].z) * scale;
 	
 	Vertex OUT;
-	OUT.position	= mul(PV, float4(pos * 10, 1));
-	//OUT.position	= float4(pos.x, pos.z, 0, 1);//mul(PV, float4(pos * 10, 1));
+	//OUT.position	= mul(PV, float4(pos * 10, 1));
+	OUT.position	= float4(pos.x, pos.z, 0, 1);//mul(PV, float4(pos * 10, 1));
 	OUT.texcoord	= uv;
 	OUT.heapID		= heapID;
 	
@@ -114,7 +115,14 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 }
 
 
-float4 DrawCBT_PS(Vertex v) : SV_Target
+float4 DrawCBT_PS1(Vertex v) : SV_Target
+{
+	//return float4(v.texcoord, 0, 1);// float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
+	//return float4(colors[v.heapID % 4] * heightMap.Sample(bilinear, v.texcoord), 1);
+	return float4(float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
+}
+
+float4 DrawCBT_PS2(Vertex v) : SV_Target
 {
 	static const float3 colors[] =
 	{
@@ -125,6 +133,7 @@ float4 DrawCBT_PS(Vertex v) : SV_Target
 	};
 	
 	//return float4(v.texcoord, 0, 1);// float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
-	return float4(colors[v.heapID % 4] * heightMap.Sample(bilinear, v.texcoord), 1);
+	return float4(colors[v.heapID % 4], 1);// * heightMap.Sample(bilinear, v.texcoord), 1);
+	//return float4(float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
 
 }

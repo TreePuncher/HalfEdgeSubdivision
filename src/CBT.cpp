@@ -271,7 +271,7 @@ namespace FlexKit
 	void CBTBuffer::PipelineStates::_InitializeStates(PipelineStates& states, RenderSystem& renderSystem)
 	{
 		renderSystem.RegisterPSOLoader(
-			UpdateCBTTree, [](RenderSystem* renderSystem, iAllocator& allocator) -> LoadPipelineStateRes
+			SumReductionCBT, [](RenderSystem* renderSystem, iAllocator& allocator) -> LoadPipelineStateRes
 			{
 				return PipelineBuilder{ allocator }.
 						AddComputeShader("SumReduction", "assets\\shaders\\cbt\\CBT_SumReduction.hlsl", { .hlsl2021 = true }).
@@ -279,20 +279,48 @@ namespace FlexKit
 			});
 
 		renderSystem.RegisterPSOLoader(
-			DrawCBTTree, [](RenderSystem* renderSystem, iAllocator& allocator) -> LoadPipelineStateRes
+			DrawCBT, [](RenderSystem* renderSystem, iAllocator& allocator) -> LoadPipelineStateRes
 			{
 				return PipelineBuilder{ allocator }.
 						AddInputTopology(ETopology::EIT_TRIANGLE).
-						AddVertexShader("DrawCBT_VS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl").
-						AddPixelShader("DrawCBT_PS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl").
-						AddRasterizerState({ .fill = EFillMode::SOLID, .CullMode = ECullMode::BACK}).
+						AddVertexShader("DrawCBT_VS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl", { .hlsl2021 = true }).
+						AddPixelShader("DrawCBT_PS1", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl", { .hlsl2021 = true }).
+						AddRasterizerState({ .fill = EFillMode::SOLID, .CullMode = ECullMode::NONE, .depthClipEnable = true }).
 						AddRenderTargetState(
-							{	.targetCount	= 1, 
-								.targetFormats	= { DeviceFormat::R16G16B16A16_FLOAT } }).
+							{	
+								.targetCount	= 1, 
+								.targetFormats	= { DeviceFormat::R16G16B16A16_FLOAT },
+							}).
+						AddDepthStencilState({
+								.depthEnable	= true,
+								.stencilEnable	= false
+							}).
+						AddDepthStencilFormat(DeviceFormat::D32_FLOAT).
 						Build(*renderSystem);
 			});
 
-		renderSystem.QueuePSOLoad(UpdateCBTTree);
+		renderSystem.RegisterPSOLoader(
+			DrawCBTWireframe, [](RenderSystem* renderSystem, iAllocator& allocator) -> LoadPipelineStateRes
+			{
+				return PipelineBuilder{ allocator }.
+						AddInputTopology(ETopology::EIT_TRIANGLE).
+						AddVertexShader("DrawCBT_VS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl", { .hlsl2021 = true }).
+						AddPixelShader("DrawCBT_PS2", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl", { .hlsl2021 = true }).
+						AddRasterizerState({ .fill = EFillMode::SOLID, .CullMode = ECullMode::NONE, .depthClipEnable = false }).
+						AddRenderTargetState(
+							{	
+								.targetCount	= 1, 
+								.targetFormats	= { DeviceFormat::R16G16B16A16_FLOAT },
+							}).
+						AddDepthStencilState({
+								.depthEnable	= false,
+								.stencilEnable	= false
+							}).
+						AddDepthStencilFormat(DeviceFormat::D32_FLOAT).
+						Build(*renderSystem);
+			});
+
+		renderSystem.QueuePSOLoad(SumReductionCBT);
 	}
 
 
@@ -301,7 +329,7 @@ namespace FlexKit
 
 	void CBTBuffer::PipelineStates::QueueReload(RenderSystem& renderSystem)
 	{
-		renderSystem.QueuePSOLoad(UpdateCBTTree);
+		renderSystem.QueuePSOLoad(SumReductionCBT);
 	}
 
 
@@ -346,7 +374,7 @@ namespace FlexKit
 	/************************************************************************************************/
 
 
-	void CBTBuffer::Update(FrameGraph& frameGraph)
+	void CBTBuffer::SumReduction_GPU(FrameGraph& frameGraph)
 	{
 		struct InitializeCBTree
 		{
@@ -375,7 +403,7 @@ namespace FlexKit
 					uint32_t start_OUT;
 				} constants;
 
-				ctx.SetComputePipelineState(UpdateCBTTree, allocator);
+				ctx.SetComputePipelineState(SumReductionCBT, allocator);
 				ctx.SetComputeUnorderedAccessView(0, handler.UAV(args.buffer, ctx));
 
 				uint32_t	stepSize	= 1;
@@ -462,7 +490,7 @@ namespace FlexKit
 
 	void CBTMemoryManager::Update(FrameGraph& frameGraph)
 	{
-		cbt.Update(frameGraph);
+		cbt.SumReduction_GPU(frameGraph);
 	}
 
 	void CBTMemoryManager::DrawDebugVIS(class FrameGraph&, ResourceHandle renderTarget)

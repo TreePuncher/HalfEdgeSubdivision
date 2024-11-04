@@ -66,8 +66,9 @@ namespace FlexKit
 	};
 
 
-	constexpr PSOHandle UpdateCBTTree	= PSOHandle(GetTypeGUID(UpdateCBTTree));
-	constexpr PSOHandle DrawCBTTree		= PSOHandle(GetTypeGUID(DrawCBTTree));
+	constexpr PSOHandle SumReductionCBT		= PSOHandle(GetTypeGUID(UpdateCBTTree));
+	constexpr PSOHandle DrawCBT				= PSOHandle(GetTypeGUID(DrawCBTTree));
+	constexpr PSOHandle DrawCBTWireframe	= PSOHandle(GetTypeGUID(DrawCBTTreeWireframe));
 
 
 	struct CBTBuffer
@@ -76,7 +77,7 @@ namespace FlexKit
 		~CBTBuffer();
 
 		void Initialize(const CBTBufferDescription & = {});
-		void Update(class FrameGraph&);
+		void SumReduction_GPU(class FrameGraph&);
 		void Upload(class FrameGraph&);
 		void Clear(class FrameGraph&);
 
@@ -117,7 +118,7 @@ namespace FlexKit
 
 		uint HeapIndexToBitIndex(const uint k) { return k * ipow(2, maxDepth - FindMSB(k)) - ipow(2, maxDepth); }
 
-	//private:
+	private:
 		uint32_t			maxDepth	= 0;
 		uint32_t			bufferSize	= 0;
 		ResourceHandle		buffer		= InvalidHandle;

@@ -16,13 +16,13 @@ float3x3 M1()
 }
 
 
-uint FindMSB(uint heapID)
+uint FindMSB(in uint heapID)
 {
 	return firstbithigh(heapID);
 }
 
 
-uint FindLSB(uint x)
+uint FindLSB(in uint x)
 {
 	return firstbitlow(x);
 }
@@ -34,7 +34,7 @@ uint Depth(in uint maxDepth, uint Bit)
 }
 
 
-uint ipow(uint base, uint exp)
+uint ipow(in uint base, in uint exp)
 {
 	uint result = 1;
 	for (;;)
@@ -61,7 +61,7 @@ uint32_t GetBitOffset(in uint32_t maxDepth, uint32_t idx)
 }
 
 
-uint32_t ReadValue(RWStructuredBuffer<uint> CBTBuffer, uint32_t start, uint32_t bitWidth)
+template<typename TY> uint32_t ReadValue(in TY CBTBuffer, uint32_t start, uint32_t bitWidth)
 {
 	const uint32_t	mask	= (uint32_t(1) << (bitWidth)) - 1;
 	const uint32_t	idx		= start / 32;
@@ -80,7 +80,7 @@ uint32_t ReadValue(RWStructuredBuffer<uint> CBTBuffer, uint32_t start, uint32_t 
 }
 
 
-void WriteValue(RWStructuredBuffer<uint> CBTBuffer, uint32_t start, uint32_t bitWidth, uint32_t value)
+void WriteValue(in RWStructuredBuffer<uint> CBTBuffer, uint32_t start, uint32_t bitWidth, uint32_t value)
 {
 	const uint32_t	idx		= start / 32;
 	const uint32_t	offset	= start % 32;
@@ -101,7 +101,8 @@ void WriteValue(RWStructuredBuffer<uint> CBTBuffer, uint32_t start, uint32_t bit
 }
 
 
-uint32_t GetHeapValue(RWStructuredBuffer<uint> CBTBuffer, in uint32_t maxDepth, uint32_t heapIdx)
+template<typename TY>
+uint32_t GetHeapValue(in TY CBTBuffer, in uint32_t maxDepth, uint32_t heapIdx)
 {
 	const uint32_t bitIdx	= GetBitOffset(maxDepth, heapIdx);
 	const uint32_t bitWidth = maxDepth - FindMSB(heapIdx) + 1;
@@ -109,7 +110,8 @@ uint32_t GetHeapValue(RWStructuredBuffer<uint> CBTBuffer, in uint32_t maxDepth, 
 }
 
 
-uint32_t DecodeNode(RWStructuredBuffer<uint> CBTBuffer, in uint32_t maxDepth, int32_t leafID)
+template<typename TY>
+uint32_t DecodeNode(in TY CBTBuffer, in uint32_t maxDepth, int32_t leafID)
 {
 	uint32_t heapID = 1;
 	uint32_t value	= GetHeapValue(CBTBuffer, maxDepth, heapID);
@@ -139,7 +141,7 @@ uint32_t DecodeNode(RWStructuredBuffer<uint> CBTBuffer, in uint32_t maxDepth, in
 }
 
 
-bool GetBitValue(uint heapID, uint bitID)
+bool GetBitValue(in uint heapID, in uint bitID)
 {
 	return (heapID >> bitID) & 0x01;
 }
