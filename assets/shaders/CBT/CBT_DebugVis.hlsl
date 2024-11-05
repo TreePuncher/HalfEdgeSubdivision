@@ -52,6 +52,7 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 	float3x3 UVs;
 	
 	if (GetBitValue(heapID, FindMSB(heapID) - 1) != 0)
+	//if (true)
 	{
 		points = 
 			float3x3(
@@ -84,8 +85,8 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 	const float3x3 tri	= mul(m, points);
 	const float3x3 UV	= mul(m, UVs);
 	const float2   uv	= UV[vertexID % 3].xy;
-	const float    h	= 0.0f * sqrt(heightMap.SampleLevel(bilinear, uv, 0)) - 1.0f;
-	const float3 pos	= float3(tri[vertexID % 3].x, h, tri[vertexID % 3].z) * scale;
+	const float    h	= 2.0f * sqrt(heightMap.SampleLevel(bilinear, uv, 0));
+	const float3 pos	= float3(tri[vertexID % 3].x, h, tri[vertexID % 3].z);
 	
 	Vertex OUT;
 	//OUT.position	= mul(PV, float4(pos * 10, 1));
@@ -101,7 +102,18 @@ float4 DrawCBT_PS1(Vertex v) : SV_Target
 {
 	//return float4(v.texcoord, 0, 1);// float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
 	//return float4(colors[v.heapID % 4] * heightMap.Sample(bilinear, v.texcoord), 1);
-	return float4(float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
+	//return float4(float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
+	
+	static const float3 colors[] =
+	{
+		float3(1, 0, 0),
+		float3(0, 1, 0),
+		float3(1, 0, 1),
+		float3(0, 0, 1),
+		float3(1, 1, 1),
+	};
+	
+	return float4(colors[v.heapID % 5], 1);// * heightMap.Sample(bilinear, v.texcoord), 1);
 }
 
 float4 DrawCBT_PS2(Vertex v) : SV_Target
@@ -112,10 +124,12 @@ float4 DrawCBT_PS2(Vertex v) : SV_Target
 		float3(0, 1, 0),
 		float3(1, 0, 1),
 		float3(0, 0, 1),
+		float3(1, 1, 1),
 	};
 	
+	return float4(0, 0, 0, 1);
 	//return float4(v.texcoord, 0, 1);// float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
-	return float4(colors[v.heapID % 4], 1);// * heightMap.Sample(bilinear, v.texcoord), 1);
+	//return float4(colors[v.heapID % 5], 1);// * heightMap.Sample(bilinear, v.texcoord), 1);
 	//return float4(float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
 
 }

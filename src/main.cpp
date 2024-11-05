@@ -177,20 +177,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		tree.SetBit(0, true);
 		tree.SetBit(1 << (depth - 1), true);
 
-		auto heapBitIdx1 = tree.HeapToBitIndex(1);
-		auto heapBitIdx2 = tree.HeapToBitIndex(2);
-		auto heapBitIdx3 = tree.HeapToBitIndex(3);
-		auto heapBitIdx4 = tree.HeapToBitIndex(4);
-		auto heapBitIdx5 = tree.HeapToBitIndex(5);
-		auto heapBitIdx6 = tree.HeapToBitIndex(6);
-		auto heapBitIdx7 = tree.HeapToBitIndex(7);
-
-		auto start = GetBitOffset(FlexKit::ipow(2, 4), 4);
-		auto temp1 = GetBitOffset(1, 4);
-		auto temp2 = GetBitOffset(2, 4);
-		auto temp3 = GetBitOffset(3, 4);
-		auto temp4 = GetBitOffset(4, 4);
-
 		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph)
 			{
 				tree.Upload(frameGraph);
@@ -404,7 +390,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 					.scale		= 50 * (sinf(t) / 2.0f + 0.5f)
 				};
 
-				t += dT / 10;
+				//t += dT / 10;
 
 				ctx.SetComputePipelineState(AdaptiveTerrainUpdate, threadLocalAllocator);
 				ctx.SetComputeUnorderedAccessView(0, resources.UAV(args.cbtBuffer, ctx));
@@ -465,7 +451,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 					.scale		= 50 * (sinf(t) / 2.0f + 0.5f)
 				};
 
-				t += dT / 10;
+				//t += dT / 10;
 
 				ctx.DiscardResource(resources.GetResource(debugVis.indirectArgumentsBuffer));
 				ctx.SetComputePipelineState(AdaptiveTerrainDrawArgs, threadLocalAllocator);
@@ -474,9 +460,9 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				ctx.SetComputeConstantValue(2, 1, &constants.maxDepth);
 				ctx.Dispatch({ 1, 1, 1 });
 
-				if(wireframe)
-					ctx.SetGraphicsPipelineState(DrawCBTWireframe, threadLocalAllocator);
-				else
+				//if(wireframe)
+				//	ctx.SetGraphicsPipelineState(DrawCBTWireframe, threadLocalAllocator);
+				//else
 					ctx.SetGraphicsPipelineState(DrawCBT, threadLocalAllocator);
 
 				ctx.SetGraphicsConstantValue(0, 18, &constants);
@@ -492,6 +478,14 @@ struct CBTTerrainState : FlexKit::FrameworkState
 					resources.IndirectArgs(debugVis.indirectArgumentsBuffer, ctx), 
 					indirectDrawLayout);
 
+				if (wireframe)
+				{
+					ctx.SetGraphicsPipelineState(DrawCBTWireframe, threadLocalAllocator);
+					ctx.ExecuteIndirect(
+						resources.IndirectArgs(debugVis.indirectArgumentsBuffer, ctx),
+						indirectDrawLayout);
+				}
+
 				ctx.EndEvent_DEBUG();
 			});
 	}
@@ -503,9 +497,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 	FlexKit::UpdateTask* Draw(FlexKit::UpdateTask* update, FlexKit::EngineCore& core, FlexKit::UpdateDispatcher& dispatcher, double dT, FlexKit::FrameGraph& frameGraph) override
 	{ 
 		using namespace FlexKit;
-
-		if (!playing)
-			return nullptr;
 
 		frameGraph.AddOutput(renderWindow->GetBackBuffer());
 		frameGraph.AddMemoryPool(poolAllocator);
@@ -527,7 +518,8 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		cameraUpdate.AddInput(transformUpdate);
 
-		TerrainAdaptiveLODUpdate(activeCamera, frameGraph, dT);
+		if (playing)
+			TerrainAdaptiveLODUpdate(activeCamera, frameGraph, dT);
 		DebugVisCBTTree(activeCamera, &cameraUpdate, depthTarget, core, dispatcher, dT, frameGraph);
 
 		//if(HEMesh && activeCamera != FlexKit::InvalidHandle)
@@ -592,7 +584,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 	FlexKit::DescriptorRange	textureDesc;
 
-	bool	wireframe = true;
+	bool	wireframe	= false;
 	bool	playing		= false;
 };
 

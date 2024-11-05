@@ -34,48 +34,96 @@ void UpdateAdaptiveTerrain(const uint tid : SV_DispatchThreadID)
 	
 	const float ar = 9.0f / 16.0f;
 	
-	const float3 IN_points[] =
+	const float4 IN_points[] =
 	{
-		float3(-ar * 0.9f, 0.0f,  0.9f),
-		float3(-ar * 0.9f, 0.0f, -0.9f),
-		float3( ar * 0.9f, 0.0f, -0.9f),
-		float3( ar * 0.9f, 0.0f,  0.9f),
+		float4(-ar * 0.9f, 0.0f,  0.9f, 1.0f),
+		float4(-ar * 0.9f, 0.0f, -0.9f, 1.0f),
+		float4( ar * 0.9f, 0.0f, -0.9f, 1.0f),
+		float4( ar * 0.9f, 0.0f,  0.9f, 1.0f),
+	};
+	
+	const float3 IN_texcoord[] =
+	{
+		float3(0.0f, 1.0f, 0.0f),
+		float3(0.0f, 0.0f, 0.0f),
+		float3(1.0f, 0.0f, 0.0f),
+		float3(1.0f, 1.0f, 0.0f),
 	};
 	
 	const uint	heapID	= DecodeNode(CBTBuffer, maxDepth, tid);
-	float3x3	points;
-	
+	float3x4	points;
+	float3x3	UVs;
 	
 	if (GetBitValue(heapID, FindMSB(heapID) - 1) != 0)
 	{
 		points =
+			float3x4(
+				float4(1, 1, 1, 1) * IN_points[0],
+				float4(1, 1, 1, 1) * IN_points[1],
+				float4(1, 1, 1, 1) * IN_points[2]);
+		
+		UVs =
 			float3x3(
-				scale * IN_points[0],
-				scale * IN_points[1],
-				scale * IN_points[2]);
+				IN_texcoord[0],
+				IN_texcoord[1],
+				IN_texcoord[2]);
 	}
 	else
 	{
 		points =
+			float3x4(
+				float4(10, 10, 10, 1) * IN_points[2],
+				float4(10, 10, 10, 1) * IN_points[3],
+				float4(10, 10, 10, 1) * IN_points[0]);
+		
+		UVs =
 			float3x3(
-				scale * IN_points[2],
-				scale * IN_points[3],
-				scale * IN_points[0]);
+				IN_texcoord[2],
+				IN_texcoord[3],
+				IN_texcoord[0]);
 	}
 	
 	const float3x3 m	= GetLEBMatrix(heapID);
-	const float3x3 tri	= mul(m, points); 
+	const float3x3 UV	= mul(m, UVs);
+	const float3x4 tri	= mul(m, points);
 	
-	const float3 a = tri[0] - tri[1]; 
-	const float3 b = tri[0] - tri[2];
+	//points[0].y = 2.0f * sqrt(heightMap.SampleLevel(bilinear, UV[0], 0));
+	//points[1].y = 2.0f * sqrt(heightMap.SampleLevel(bilinear, UV[1], 0));
+	//points[2].y = 2.0f * sqrt(heightMap.SampleLevel(bilinear, UV[2], 0));
+	//
+	//float3x4 SSTri = transpose(mul(PV, transpose(tri)));
+	//
+	//SSTri[0] /= SSTri[0].w;
+	//SSTri[1] /= SSTri[1].w;
+	//SSTri[2] /= SSTri[2].w;
 	
-	const float l = length(cross(a, b)) / 2.0f;
-	if (l > 0.0125f)
+	const float minX = min(min(tri[0].x, tri[1].x), tri[2].x);
+	const float minY = min(min(tri[0].y, tri[1].y), tri[2].y);
+	const float minZ = min(min(tri[0].z, tri[1].z), tri[2].z);
+
+	const float maxX = max(max(tri[0].x, tri[1].x), tri[2].x);
+	const float maxY = max(max(tri[0].y, tri[1].y), tri[2].y);
+	const float maxZ = max(max(tri[0].z, tri[1].z), tri[2].z);
+	
+	if(tid % 32 != 0)
+		return;
+	
+	// split
+	if (FindMSB(heapID) < maxDepth)
 	{
+		//SetBit(CBTBuffer, HeapToBitIndex(heapID * 2, maxDepth), true, maxDepth);
 		SetBit(CBTBuffer, HeapToBitIndex(heapID * 2 + 1, maxDepth), true, maxDepth);
+		
+		uint parentID = LEBQuadNeighbors(heapID).z;
+		while (parentID > 3)
+		{
+			SetBit(CBTBuffer, HeapToBitIndex(parentID * 2,		maxDepth), true, maxDepth);
+			SetBit(CBTBuffer, HeapToBitIndex(parentID * 2 + 1,	maxDepth), true, maxDepth);
+			parentID = parentID / 2;
+			
+			SetBit(CBTBuffer, HeapToBitIndex(parentID * 2,		maxDepth), true, maxDepth);
+			SetBit(CBTBuffer, HeapToBitIndex(parentID * 2 + 1,	maxDepth), true, maxDepth);
+			parentID = LEBQuadNeighbors(parentID).z;
+		}
 	}
-	//else if (l < 0.01)
-	//{ // merge
-	//	
-	//}
 }

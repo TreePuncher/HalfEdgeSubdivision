@@ -306,7 +306,7 @@ namespace FlexKit
 						AddInputTopology(ETopology::EIT_TRIANGLE).
 						AddVertexShader("DrawCBT_VS", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl", { .hlsl2021 = true }).
 						AddPixelShader("DrawCBT_PS2", "assets\\shaders\\cbt\\CBT_DebugVis.hlsl", { .hlsl2021 = true }).
-						AddRasterizerState({ .fill = EFillMode::SOLID, .CullMode = ECullMode::NONE, .depthClipEnable = false }).
+						AddRasterizerState({ .fill = EFillMode::WIREFRAME, .CullMode = ECullMode::NONE, .depthClipEnable = false }).
 						AddRenderTargetState(
 							{	
 								.targetCount	= 1, 
@@ -389,7 +389,7 @@ namespace FlexKit
 			},
 			[this](InitializeCBTree& args, ResourceHandler& handler, Context& ctx, iAllocator& allocator)
 			{
-				ctx.BeginEvent_DEBUG("CBTBuffer::Update");
+				ctx.BeginEvent_DEBUG("CBTBuffer::SumReduction");
 
 				uint32_t bufferSize = 32;
 

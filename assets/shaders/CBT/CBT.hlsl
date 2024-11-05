@@ -186,33 +186,58 @@ float3x3 GetLEBMatrix(in const uint heapID)
 
 uint rule(uint n)
 {
-	return n == 1 ? n : n;
+	return n > 1 ? n: 0;
 }
 
 
 uint4 GetNeighbors0(in const uint4 n)
 {
-	return uint4(rule(2 * n.w + 1), rule(2 * n.z + 1), rule(2 * n.y + 1), 2 * n.w);
+	return uint4(
+			rule(2 * n.w + 1), 
+			rule(2 * n.z + 1), 
+			rule(2 * n.y + 1), 
+			2 * n.w);
 }
 
 
 uint4 GetNeighbors1(in const uint4 n)
 {
-	return uint4(rule(2 * n.z), rule(2 * n.w + 1), rule(2 * n.x), 2 * n.w + 1);
+	return uint4(
+			rule(2 * n.z), 
+			rule(2 * n.w), 
+			rule(2 * n.x), 
+			2 * n.w + 1);
 }
 
 
-uint4 LebNeighbors(in const uint heapID)
+uint4 LEBTriangleNeighbors(in const uint heapID)
 {
 	const uint	d = FindMSB(heapID);
 	uint4		n = uint4(0, 0, 0, 1);
+	
+	for (int bitID = d - 1; bitID >= 0; --bitID)
+	{
+		uint b = GetBitValue(heapID, bitID);
+		if (b == 0)
+			n = GetNeighbors0(n);
+		else 
+			n = GetNeighbors1(n);
+	}
+	
+	return n;
+}
+
+uint4 LEBQuadNeighbors(in const uint heapID)
+{
+	const uint d = FindMSB(heapID);
+	uint4 n = (GetBitValue(heapID, FindMSB(heapID) - 1) == 0) ? uint4(0, 0, 3, 2) : uint4(0, 0, 2, 3);
 	
 	for (int bitID = d - 2; bitID >= 0; --bitID)
 	{
 		uint b = GetBitValue(heapID, bitID);
 		if (b == 0)
 			n = GetNeighbors0(n);
-		else 
+		else
 			n = GetNeighbors1(n);
 	}
 	
