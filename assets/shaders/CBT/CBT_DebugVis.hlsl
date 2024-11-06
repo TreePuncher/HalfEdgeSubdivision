@@ -27,15 +27,15 @@ struct Vertex
 [RootSignature(RS_DEBUGVIS)]
 Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 {	
-	const uint tid = (vertexID / 3);
-	const float a = 9.0f / 16.0f;
+	const uint tid	= (vertexID / 3);
+	const float a	= 10.0f * 9.0f / 16.0f;
 	
 	const float3 IN_points[] =
 	{
-		float3(-a * 0.9f, 0.0f,  0.9f),
-		float3(-a * 0.9f, 0.0f, -0.9f),
-		float3( a * 0.9f, 0.0f, -0.9f),
-		float3( a * 0.9f, 0.0f,  0.9f),
+		float3(-20.0f, 0.0f,  20.0f),
+		float3(-20.0f, 0.0f, -20.0f),
+		float3( 20.0f, 0.0f, -20.0f),
+		float3( 20.0f, 0.0f,  20.0f),
 	};
 	
 	const float3 IN_texcoord[] =
@@ -85,12 +85,11 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 	const float3x3 tri	= mul(m, points);
 	const float3x3 UV	= mul(m, UVs);
 	const float2   uv	= UV[vertexID % 3].xy;
-	const float    h	= 2.0f * sqrt(heightMap.SampleLevel(bilinear, uv, 0));
-	const float3 pos	= float3(tri[vertexID % 3].x, h, tri[vertexID % 3].z);
+	const float3 pos	= tri[vertexID % 3];
+	const float    h	= -10.0f + 10.0f * sqrt(heightMap.SampleLevel(bilinear, uv, 0));
 	
 	Vertex OUT;
-	//OUT.position	= mul(PV, float4(pos * 10, 1));
-	OUT.position	= float4(pos.x, pos.z, 0, 1);//mul(PV, float4(pos * 10, 1));
+	OUT.position	= mul(PV, float4(pos.x, h, pos.z, 1));
 	OUT.texcoord	= uv;
 	OUT.heapID		= heapID;
 	

@@ -3,6 +3,7 @@
 
 #include <Application.hpp>
 #include <atomic>
+#include <CameraUtilities.hpp>
 #include <CBT.hpp>
 #include <ModifiableShape.hpp>
 #include <MemoryUtilities.hpp>
@@ -138,6 +139,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		auto& renderSystem = framework.GetRenderSystem();
 		RegisterAdaptiveUpdateCBT(renderSystem);
 
+
 		indirectDispatchLayout = renderSystem.CreateIndirectLayout(
 			{
 				IndirectDrawDescription{ 
@@ -146,6 +148,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				IndirectDrawDescription{ IndirectLayoutEntryType::ILE_DispatchCall },
 			}, 
 			in_framework.core.GetBlockMemory(), std::get<1>(renderSystem.GetPSOAndRootSignature(AdaptiveTerrainUpdate, in_framework.core.GetTempMemory())));
+
 
 		indirectDrawLayout = renderSystem.CreateIndirectLayout(
 			{
@@ -160,16 +163,17 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				.width	= 1920,
 			});
 
+
 		FlexKit::EventNotifier<>::Subscriber sub;
 		sub.Notify	= &FlexKit::EventsWrapper;
 		sub._ptr	= &framework;
 		renderWindow->Handler.Subscribe(sub);
 		renderWindow->SetWindowTitle("HelloWorld");
 
-		vertexBuffer = renderSystem.CreateVertexBuffer(512, false);
 
+		constantBuffer	= renderSystem.CreateConstantBuffer(MEGABYTE, false);
+		vertexBuffer	= renderSystem.CreateVertexBuffer(512, false);
 		renderSystem.RegisterPSOLoader(FlexKit::DRAW_PSO, FlexKit::CreateDrawTriStatePSO);
-
 
 		const uint32_t depth = 18;
 		tree.Initialize({ .maxDepth = depth });
@@ -183,7 +187,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				tree.SumReduction_GPU(frameGraph);
 			});
 
-
 		ModifiableShape shape{ framework.core.GetBlockMemory() };
 
 		const uint32_t face0[] = {
@@ -191,7 +194,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			shape.AddVertex({  -0.9f, 0.0f,  0.0f }),
 			shape.AddVertex({   0.0f, 0.0f,  0.9f }) 
 		};
-		
 		const uint32_t face1[] = {
 			face0[0], face0[2],
 			shape.AddVertex({  0.9f, 0.0f,  0.9f }),
@@ -221,18 +223,17 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			});
 
 		auto& cameraNode	= camera.AddView<SceneNodeView>();
-		auto& cameraView	= camera.AddView<CameraView>();
+		auto& orbitCamera	= camera.AddView<OrbitCameraBehavior>();
 
-		cameraNode.Pitch(FlexKit::pi / -5);
-		cameraNode.TranslateWorld({  0, 2.5, 15 });
-		cameraView.SetCameraNode(cameraNode);
-		cameraView.SetCameraFOV(FlexKit::pi / 3);
-		cameraView.SetCameraAspectRatio(1080.0f / 1920.0f);
+		//cameraNode.Pitch(FlexKit::pi / 5);
+		orbitCamera.TranslateWorld({  0, 5.0f, 0 });
+		orbitCamera.SetCameraFOV(0.523599);
+		orbitCamera.SetCameraAspectRatio(1080.0f / 1920.0f);
 
-		activeCamera = cameraView;
+		activeCamera = orbitCamera;
 
 
-		if(false)
+		if(true)
 		{
 			int width, height, channels;
 			auto heightValues = stbi_loadf("assets\\HeightMap.png", &width, &height, &channels, 1);
@@ -282,6 +283,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 	FlexKit::UpdateTask* Update(FlexKit::EngineCore& core, FlexKit::UpdateDispatcher&, double dT) override
 	{ 
 		FlexKit::UpdateInput();
+		renderWindow->UpdateCapturedMouseInput(dT);
 
 		return nullptr; 
 	};
@@ -351,16 +353,19 @@ struct CBTTerrainState : FlexKit::FrameworkState
 	/************************************************************************************************/
 
 
-	void TerrainAdaptiveLODUpdate(FlexKit::CameraHandle camera, FlexKit::FrameGraph& frameGraph, double dT)
+	void TerrainAdaptiveLODUpdate(FlexKit::CameraHandle camera, FlexKit::ReserveConstantBufferFunction& cbAllocator, FlexKit::FrameGraph& frameGraph, double dT)
 	{
 		struct CBT_UpdateAdaptiveTerrain
 		{
 			FlexKit::FrameResourceHandle indirectArgumentsBuffer;
 			FlexKit::FrameResourceHandle cbtBuffer;
+			FlexKit::ReserveConstantBufferFunction cbAllocator;
 		};
 
 		frameGraph.AddNode<CBT_UpdateAdaptiveTerrain>(
-			{},
+			{
+				.cbAllocator = cbAllocator
+			},
 			[&](FlexKit::FrameGraphNodeBuilder& builder, CBT_UpdateAdaptiveTerrain& args)
 			{
 				args.indirectArgumentsBuffer	= builder.AcquireVirtualResource(FlexKit::GPUResourceDesc::UAVResource(1024), FlexKit::DeviceAccessState::DASUAV);
@@ -380,22 +385,33 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 				static double t = (FlexKit::pi * 3.0f / 2.0f);
 
+				auto cameraConstants = FlexKit::GetCameraConstants(camera);
 				struct {
 					FlexKit::float4x4_GPU	PV;
 					uint32_t				maxDepth;
 					float					scale;
 				} constants{ 
-					.PV			= FlexKit::GetCameraConstants(camera).PV,
+					.PV			= cameraConstants.PV,
 					.maxDepth	= tree.GetMaxDepth(),
 					.scale		= 50 * (sinf(t) / 2.0f + 0.5f)
 				};
 
-				//t += dT / 10;
+				struct {
+					FlexKit::float4x4_GPU	view;
+					FlexKit::Frustum		frustum;
+				}	intersectionConstants{
+					.view		= cameraConstants.View,
+					.frustum	= FlexKit::GetFrustumVS(camera)
+				};
+
+				FlexKit::CBPushBuffer			cbLocalAllocator{ args.cbAllocator(FlexKit::AlignedSize(sizeof(intersectionConstants))) };
+				FlexKit::ConstantBufferDataSet	frustumConstants{ intersectionConstants, cbLocalAllocator };
 
 				ctx.SetComputePipelineState(AdaptiveTerrainUpdate, threadLocalAllocator);
 				ctx.SetComputeUnorderedAccessView(0, resources.UAV(args.cbtBuffer, ctx));
 				ctx.SetComputeConstantValue(1, 18, &constants);
 				ctx.SetComputeDescriptorTable(2, textureDesc);
+				ctx.SetComputeConstantBufferView(4, frustumConstants);
 				ctx.ExecuteIndirect(resources.IndirectArgs(args.indirectArgumentsBuffer, ctx), indirectDispatchLayout, 0);
 
 				ctx.AddUAVBarrier(resources.GetResource(args.cbtBuffer));
@@ -501,7 +517,8 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		frameGraph.AddOutput(renderWindow->GetBackBuffer());
 		frameGraph.AddMemoryPool(poolAllocator);
 
-		auto depthTarget = depthBuffer.Get();
+		auto constBufferAllocator	= CreateConstantBufferReserveObject(constantBuffer, core.RenderSystem, core.GetTempMemory());
+		auto depthTarget			= depthBuffer.Get();
 
 		ClearBackBuffer(frameGraph, renderWindow->GetBackBuffer());
 		ClearDepthBuffer(frameGraph, depthTarget, 1.0f);
@@ -510,7 +527,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		//gpuMemoryManager.DrawDebugVIS(frameGraph, renderWindow->GetBackBuffer());
 		
-		//Yaw(camera, dT * FlexKit::pi / 4.0f);
+		//Pitch(camera, -dT * FlexKit::pi / 4.0f);
 		MarkCameraDirty(activeCamera);
 
 		auto& transformUpdate	= QueueTransformUpdateTask(dispatcher);
@@ -518,8 +535,11 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		cameraUpdate.AddInput(transformUpdate);
 
+		if (auto orbitCamera = camera.GetView<FlexKit::OrbitCameraBehavior>(); orbitCamera)
+			transformUpdate.AddInput(QueueOrbitCameraUpdateTask(dispatcher, *orbitCamera, renderWindow->mouseState, dT));
+
 		if (playing)
-			TerrainAdaptiveLODUpdate(activeCamera, frameGraph, dT);
+			TerrainAdaptiveLODUpdate(activeCamera, constBufferAllocator, frameGraph, dT);
 		DebugVisCBTTree(activeCamera, &cameraUpdate, depthTarget, core, dispatcher, dT, frameGraph);
 
 		//if(HEMesh && activeCamera != FlexKit::InvalidHandle)
@@ -536,6 +556,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 	void PostDrawUpdate(FlexKit::EngineCore& core, double dT) override
 	{
+		core.RenderSystem.ResetConstantBuffer(constantBuffer);
 		depthBuffer.Increment();
 		renderWindow->Present(1);
 	}
@@ -546,14 +567,55 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 	bool EventHandler(FlexKit::Event evt) 
 	{
-		if (evt.InputSource == evt.E_SystemEvent && evt.Action == FlexKit::Event::InputAction::Exit)
-			framework.quit = true;
-
-		if (evt.InputSource == FlexKit::Event::Keyboard && evt.mData1.mKC[0] == FlexKit::KC_SPACE && evt.Action == FlexKit::Event::Release)
-			wireframe = !wireframe;
-
-		if (evt.InputSource == FlexKit::Event::Keyboard && evt.mData1.mKC[0] == FlexKit::KC_P && evt.Action == FlexKit::Event::Release)
-			playing = !playing;
+		switch (evt.InputSource)
+		{
+		case FlexKit::Event::E_SystemEvent:
+			if(evt.Action == FlexKit::Event::InputAction::Exit)
+				framework.quit = true;
+			break;
+		case FlexKit::Event::Keyboard:
+		{
+			switch(evt.mData1.mKC[0])
+			{
+			case FlexKit::KC_SPACE:
+				if (evt.Action == FlexKit::Event::Release)
+				{
+					wireframe = !wireframe;
+					return true;
+				}
+				break;
+			case FlexKit::KC_M:
+				if (evt.Action == FlexKit::Event::Release)
+				{
+					renderWindow->ToggleMouseCapture();
+					return true;
+				}
+			case FlexKit::KC_P:
+				if (evt.Action == FlexKit::Event::Release)
+				{
+					playing = !playing;
+					return true;
+				}
+				break;
+			case FlexKit::KC_W:
+			case FlexKit::KC_A:
+			case FlexKit::KC_S:
+			case FlexKit::KC_D:
+			case FlexKit::KC_Q:
+			case FlexKit::KC_E:
+			{
+				if (auto orbiter = camera.GetView<FlexKit::OrbitCameraBehavior>(); orbiter)
+				{
+					auto remappedEvt = evt;
+					return orbiter->HandleEvent(remappedEvt);
+				}
+			}	break;
+			}
+		}	break;
+		default:
+		{
+		}	break;
+		}
 
 		return false; 
 	}
@@ -575,6 +637,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 	FlexKit::MemoryPoolAllocator	poolAllocator;
 	FlexKit::VertexBufferHandle		vertexBuffer;
+	FlexKit::ConstantBufferHandle	constantBuffer;
 	FlexKit::Win32RenderWindow*		renderWindow = nullptr;
 	FlexKit::DepthBuffer			depthBuffer;
 
