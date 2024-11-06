@@ -68,6 +68,19 @@ bool Intersects(const in Frustum frustum, const in AABB aabb)
 	return true;
 }
 
+float TriangleLevelOfDetail_Perspective(in const float3x3 verts)
+{
+	const float3	v0 = mul(view, float4(verts[0], 1)).xyz;
+	const float3	v2 = mul(view, float4(verts[2], 1)).xyz;
+	
+	const float3	edgeCenter = (v0 + v2) / 2; 
+	const float3	edgeVector = (v2 - v0);
+	const float		distanceToEdgeSqr	= dot(edgeCenter, edgeCenter);
+	const float		edgeLengthSqr		= dot(edgeVector, edgeVector);
+
+	return 11.04509354 + log2(edgeLengthSqr / distanceToEdgeSqr);
+}
+
 [RootSignature(RS_DEBUGVIS)]
 [NumThreads(64, 1, 1)]
 void UpdateAdaptiveTerrain(const uint tid : SV_DispatchThreadID)
@@ -134,10 +147,14 @@ void UpdateAdaptiveTerrain(const uint tid : SV_DispatchThreadID)
 	const float h1	= -10.0f + 10.0f * sqrt(heightMap.SampleLevel(bilinear, UV[1], 0));
 	const float h2	= -10.0f + 10.0f * sqrt(heightMap.SampleLevel(bilinear, UV[2], 0));
 	
+	tri[0].y = h0;
+	tri[1].y = h1;
+	tri[2].y = h2;
+	
 	float4 VSTri[3] = {
-		mul(view, float4(tri[0].x, h0, tri[0].z, 1.0f)),
-		mul(view, float4(tri[1].x, h1, tri[1].z, 1.0f)),
-		mul(view, float4(tri[2].x, h2, tri[2].z, 1.0f)),
+		mul(view, float4(tri[0].xyz, 1.0f)),
+		mul(view, float4(tri[1].xyz, 1.0f)),
+		mul(view, float4(tri[2].xyz, 1.0f)),
 	};
 	
 	AABB aabb;
@@ -151,11 +168,8 @@ void UpdateAdaptiveTerrain(const uint tid : SV_DispatchThreadID)
 		max(max(VSTri[0].y, VSTri[1].y), VSTri[2].y),
 		max(max(VSTri[0].z, VSTri[1].z), VSTri[2].z));
 	
-	if (!Intersects(f, aabb))
-		return;
-	
 	// split
-	if (FindMSB(heapID) < maxDepth)
+	if (FindMSB(heapID) < maxDepth && Intersects(f, aabb) && TriangleLevelOfDetail_Perspective(tri) > 1.0f)
 	{
 		SetBit(CBTBuffer, HeapToBitIndex(heapID * 2 + 1, maxDepth), true, maxDepth);
 		

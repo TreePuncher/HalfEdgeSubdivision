@@ -175,7 +175,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		vertexBuffer	= renderSystem.CreateVertexBuffer(512, false);
 		renderSystem.RegisterPSOLoader(FlexKit::DRAW_PSO, FlexKit::CreateDrawTriStatePSO);
 
-		const uint32_t depth = 18;
+		const uint32_t depth = 24;
 		tree.Initialize({ .maxDepth = depth });
 
 		tree.SetBit(0, true);

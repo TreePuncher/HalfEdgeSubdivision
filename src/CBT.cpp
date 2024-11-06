@@ -359,7 +359,7 @@ namespace FlexKit
 		if (buffer != InvalidHandle)
 			renderSystem.ReleaseResource(buffer);
 
-		auto size	= 4096 * 64;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
+		auto size	= 128 * MEGABYTE;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
 		buffer		= renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(size));
 		maxDepth	= description.maxDepth;
 		bufferSize	= size;
