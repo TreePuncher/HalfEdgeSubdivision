@@ -175,11 +175,28 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		vertexBuffer	= renderSystem.CreateVertexBuffer(512, false);
 		renderSystem.RegisterPSOLoader(FlexKit::DRAW_PSO, FlexKit::CreateDrawTriStatePSO);
 
-		const uint32_t depth = 24;
+		const uint32_t depth = 26;
 		tree.Initialize({ .maxDepth = depth });
 
-		tree.SetBit(0, true);
-		tree.SetBit(1 << (depth - 1), true);
+		tree.SetBit(0 * (1 << (depth - 1)), true); // 2
+		tree.SetBit(1 * (1 << (depth - 1)), true); // 3
+		
+		tree.SetBit(0 * (1 << (depth - 2)), true); // 4
+		tree.SetBit(1 * (1 << (depth - 2)), true); // 5
+		tree.SetBit(2 * (1 << (depth - 2)), true); // 6
+		tree.SetBit(3 * (1 << (depth - 2)), true); // 7
+		
+		for(int i = 0; i < 8; i++) // 8 - 15
+			tree.SetBit(i * (1 << (depth - 3)), true);
+		
+		for (int i = 0; i < 16; i++) // 15 - 31
+			tree.SetBit(i * (1 << (depth - 4)), true);
+		
+		for (int i = 0; i < 32; i++) // 32 - 63
+			tree.SetBit(i * (1 << (depth - 5)), true);
+		
+		for (int i = 0; i < 64; i++) // 64 - 127
+			tree.SetBit(i * (1 << (depth - 6)), true);
 
 		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph)
 			{
@@ -216,19 +233,19 @@ struct CBTTerrainState : FlexKit::FrameworkState
 							framework.GetRenderSystem(), 
 							framework.core.GetBlockMemory());
 
-		runOnce.push_back(
-			[&](FlexKit::FrameGraph& frameGraph) 
-			{
-				HEMesh->BuildSubDivLevel(frameGraph);
-			});
+		//runOnce.push_back(
+		//	[&](FlexKit::FrameGraph& frameGraph) 
+		//	{
+		//		HEMesh->BuildSubDivLevel(frameGraph);
+		//	});
 
 		auto& cameraNode	= camera.AddView<SceneNodeView>();
 		auto& orbitCamera	= camera.AddView<OrbitCameraBehavior>();
 
-		//cameraNode.Pitch(FlexKit::pi / 5);
+		orbitCamera.acceleration = 500.0f;
 		orbitCamera.TranslateWorld({  0, 5.0f, 0 });
 		orbitCamera.SetCameraFOV(0.523599);
-		orbitCamera.SetCameraAspectRatio(1080.0f / 1920.0f);
+		orbitCamera.SetCameraAspectRatio(1920.0f / 1080.0f);
 
 		activeCamera = orbitCamera;
 
@@ -355,11 +372,13 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 	void TerrainAdaptiveLODUpdate(FlexKit::CameraHandle camera, FlexKit::ReserveConstantBufferFunction& cbAllocator, FlexKit::FrameGraph& frameGraph, double dT)
 	{
+		using namespace FlexKit;
+
 		struct CBT_UpdateAdaptiveTerrain
 		{
-			FlexKit::FrameResourceHandle indirectArgumentsBuffer;
-			FlexKit::FrameResourceHandle cbtBuffer;
-			FlexKit::ReserveConstantBufferFunction cbAllocator;
+			FrameResourceHandle				indirectArgumentsBuffer;
+			FrameResourceHandle				cbtBuffer;
+			ReserveConstantBufferFunction	cbAllocator;
 		};
 
 		frameGraph.AddNode<CBT_UpdateAdaptiveTerrain>(
@@ -385,7 +404,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 				static double t = (FlexKit::pi * 3.0f / 2.0f);
 
-				auto cameraConstants = FlexKit::GetCameraConstants(camera);
+				auto cameraConstants = GetCameraConstants(camera);
 				struct {
 					FlexKit::float4x4_GPU	PV;
 					uint32_t				maxDepth;
@@ -397,15 +416,15 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				};
 
 				struct {
-					FlexKit::float4x4_GPU	view;
-					FlexKit::Frustum		frustum;
+					float4x4_GPU	view;
+					Frustum			frustum;
 				}	intersectionConstants{
 					.view		= cameraConstants.View,
-					.frustum	= FlexKit::GetFrustumVS(camera)
+					.frustum	= GetFrustumVS(camera)
 				};
 
-				FlexKit::CBPushBuffer			cbLocalAllocator{ args.cbAllocator(FlexKit::AlignedSize(sizeof(intersectionConstants))) };
-				FlexKit::ConstantBufferDataSet	frustumConstants{ intersectionConstants, cbLocalAllocator };
+				CBPushBuffer			cbLocalAllocator{ args.cbAllocator(AlignedSize(sizeof(intersectionConstants))) };
+				ConstantBufferDataSet	frustumConstants{ intersectionConstants, cbLocalAllocator };
 
 				ctx.SetComputePipelineState(AdaptiveTerrainUpdate, threadLocalAllocator);
 				ctx.SetComputeUnorderedAccessView(0, resources.UAV(args.cbtBuffer, ctx));
@@ -476,10 +495,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 				ctx.SetComputeConstantValue(2, 1, &constants.maxDepth);
 				ctx.Dispatch({ 1, 1, 1 });
 
-				//if(wireframe)
-				//	ctx.SetGraphicsPipelineState(DrawCBTWireframe, threadLocalAllocator);
-				//else
-					ctx.SetGraphicsPipelineState(DrawCBT, threadLocalAllocator);
+				ctx.SetGraphicsPipelineState(DrawCBT, threadLocalAllocator);
 
 				ctx.SetGraphicsConstantValue(0, 18, &constants);
 				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(debugVis.cbtBuffer, ctx));
@@ -648,7 +664,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 	FlexKit::DescriptorRange	textureDesc;
 
 	bool	wireframe	= false;
-	bool	playing		= false;
+	bool	playing		= true;
 };
 
 

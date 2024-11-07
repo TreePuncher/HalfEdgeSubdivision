@@ -16,6 +16,9 @@ float3x3 M1()
 }
 
 
+/************************************************************************************************/
+
+
 uint FindMSB(in uint heapID)
 {
 	return firstbithigh(heapID);
@@ -26,6 +29,9 @@ uint FindLSB(in uint x)
 {
 	return firstbitlow(x);
 }
+
+
+/************************************************************************************************/
 
 
 uint Depth(in uint maxDepth, uint Bit)
@@ -51,6 +57,9 @@ uint ipow(in uint base, in uint exp)
 }
 
 
+/************************************************************************************************/
+
+
 uint32_t GetBitOffset(uint32_t idx, in uint32_t maxDepth)
 {
 	const uint32_t d_k		= FindMSB(idx);
@@ -59,6 +68,9 @@ uint32_t GetBitOffset(uint32_t idx, in uint32_t maxDepth)
 
 	return X_k;
 }
+
+
+/************************************************************************************************/
 
 
 template<typename TY> uint32_t ReadValue(in TY CBTBuffer, uint32_t start, uint32_t bitWidth)
@@ -78,6 +90,9 @@ template<typename TY> uint32_t ReadValue(in TY CBTBuffer, uint32_t start, uint32
 
 	return value;
 }
+
+
+/************************************************************************************************/
 
 
 void WriteValue(in RWStructuredBuffer<uint> CBTBuffer, uint32_t start, uint32_t bitWidth, uint32_t value)
@@ -101,11 +116,14 @@ void WriteValue(in RWStructuredBuffer<uint> CBTBuffer, uint32_t start, uint32_t 
 }
 
 
+/************************************************************************************************/
+
+
 void SetBit(in RWStructuredBuffer<uint> CBTBuffer, uint32_t bitIdx, bool bit, uint32_t maxDepth)
 {
-	const uint64_t bitArrayOffset	= GetBitOffset(ipow(2, maxDepth), maxDepth);
-	const uint32_t wordIdx			= (bitArrayOffset + bitIdx) / (8 * sizeof(uint32_t));
-	const uint32_t bitOffset		= (bitArrayOffset + bitIdx) % (8 * sizeof(uint32_t));
+	bitIdx  += GetBitOffset(ipow(2, maxDepth), maxDepth);
+	const uint32_t wordIdx			= bitIdx / (8 * sizeof(uint32_t));
+	const uint32_t bitOffset		= bitIdx % (8 * sizeof(uint32_t));
 	const uint32_t mask				= 0x01 << bitOffset;
 	
 	InterlockedAnd(CBTBuffer[wordIdx], ~mask);
@@ -153,10 +171,16 @@ uint32_t DecodeNode(in TY CBTBuffer, in uint32_t maxDepth, int32_t leafID)
 }
 
 
+/************************************************************************************************/
+
+
 bool GetBitValue(in uint heapID, in uint bitID)
 {
 	return (heapID >> bitID) & 0x01;
 }
+
+
+/************************************************************************************************/
 
 
 float3x3 GetLEBMatrix(in const uint heapID)
@@ -182,6 +206,9 @@ float3x3 GetLEBMatrix(in const uint heapID)
 	
 	return m;
 }
+
+
+/************************************************************************************************/
 
 
 uint rule(uint n)
@@ -210,7 +237,14 @@ uint4 GetNeighbors1(in const uint4 n)
 }
 
 
-uint4 LEBTriangleNeighbors(in const uint heapID)
+struct Neighbors
+{
+	uint A;
+	uint B;
+	uint edge;
+};
+
+Neighbors LEBTriangleNeighbors(in const uint heapID)
 {
 	const uint	d = FindMSB(heapID);
 	uint4		n = uint4(0, 0, 0, 1);
@@ -224,10 +258,15 @@ uint4 LEBTriangleNeighbors(in const uint heapID)
 			n = GetNeighbors1(n);
 	}
 	
-	return n;
+	Neighbors OUT;
+	OUT.A		= n.x;
+	OUT.B		= n.y;
+	OUT.edge	= n.z;
+	return OUT;
 }
 
-uint4 LEBQuadNeighbors(in const uint heapID)
+
+Neighbors LEBQuadNeighbors(in const uint heapID)
 {
 	const uint d = FindMSB(heapID);
 	uint4 n = (GetBitValue(heapID, FindMSB(heapID) - 1) == 0) ? uint4(0, 0, 3, 2) : uint4(0, 0, 2, 3);
@@ -241,8 +280,15 @@ uint4 LEBQuadNeighbors(in const uint heapID)
 			n = GetNeighbors1(n);
 	}
 	
-	return n;
+	Neighbors OUT;
+	OUT.A		= n.x;
+	OUT.B		= n.y;
+	OUT.edge	= n.z;
+	return OUT;
 }
+
+
+/************************************************************************************************/
 
 
 uint32_t HeapToBitIndex(uint32_t k, uint32_t maxDepth) 
@@ -251,9 +297,80 @@ uint32_t HeapToBitIndex(uint32_t k, uint32_t maxDepth)
 }
 
 
+/************************************************************************************************/
+
+
+uint BitFieldHeapID(uint32_t heapID, uint32_t maxDepth)
+{
+	uint32_t d = FindMSB(heapID);
+	return heapID * ipow(2, maxDepth - d);
+}
+
+
+/************************************************************************************************/
+
+
+template<typename TY>
+bool IsLeafNode(in TY CBTBuffer, in const uint sibling, in const uint leftID, in const uint rightID, const in uint maxDepth)
+{
+	const bool a = (GetHeapValue(CBTBuffer, maxDepth, sibling) == 1);
+	const bool b = (GetHeapValue(CBTBuffer, maxDepth, leftID)  == 1);
+	const bool c = (GetHeapValue(CBTBuffer, maxDepth, rightID) == 1);
+	
+	return a & b & c;
+}
+
+
+/************************************************************************************************/
+
+
+void Split(RWStructuredBuffer<uint32_t> CBTBuffer, const in uint32_t heapID, const in uint32_t maxDepth)
+{
+	SetBit(CBTBuffer, HeapToBitIndex(heapID * 2 + 1, maxDepth), true, maxDepth);
+		
+	uint parentID = LEBQuadNeighbors(heapID).edge;
+	while (parentID > 3)
+	{
+		SetBit(CBTBuffer, HeapToBitIndex(parentID * 2 + 1,	maxDepth), true, maxDepth);
+		parentID = parentID / 2;
+			
+		SetBit(CBTBuffer, HeapToBitIndex(parentID * 2 + 1,	maxDepth), true, maxDepth);
+		parentID = LEBQuadNeighbors(parentID).edge;
+	}
+}
+
+
+/************************************************************************************************/
+
+
+void MergeNode(in RWStructuredBuffer<uint> CBTBuffer, uint32_t heapIdx, in const uint32_t maxDepth)
+{
+	heapIdx = heapIdx | 1;
+	SetBit(CBTBuffer, HeapToBitIndex(heapIdx, maxDepth), false, maxDepth);
+}
+
+
+/************************************************************************************************/
+
+
+void Merge(RWStructuredBuffer<uint32_t> CBTBuffer, const in uint32_t heapID, const in uint32_t maxDepth)
+{
+	const uint diamondID	= LEBQuadNeighbors(heapID / 2).edge;
+	const uint leftID		= 2 * diamondID;
+	const uint rightID		= 2 * diamondID + 1;
+	const uint siblingID	= heapID ^ 1;
+	
+	if (IsLeafNode(CBTBuffer, siblingID, leftID, rightID, maxDepth))
+	{
+		MergeNode(CBTBuffer, heapID, maxDepth);
+		MergeNode(CBTBuffer, rightID, maxDepth);
+	}
+}
+
+
 /**********************************************************************
 
-Copyright (c) 2024 Robert May
+Copyright (c) 2025 Robert May
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),

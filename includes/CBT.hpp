@@ -116,6 +116,9 @@ namespace FlexKit
 
 		void		SumReduction() noexcept;
 
+		void*		data()		noexcept { return bitField.data(); }
+		size_t		ByteSize()	noexcept { return bitField.ByteSize(); }
+
 		uint HeapIndexToBitIndex(const uint k) { return k * ipow(2, maxDepth - FindMSB(k)) - ipow(2, maxDepth); }
 
 	private:

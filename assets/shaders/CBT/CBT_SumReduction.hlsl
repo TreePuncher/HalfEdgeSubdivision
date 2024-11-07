@@ -17,7 +17,7 @@ cbuffer constants : register(b0)
 RWStructuredBuffer<uint32_t> CBTBuffer : register(u0);
 
 [RootSignature(SumReductionRS)]
-[NumThreads(64, 1, 1)]
+[NumThreads(1024, 1, 1)]
 void SumReduction(const uint j : SV_DispatchThreadID)
 {
 	if (j >= end)

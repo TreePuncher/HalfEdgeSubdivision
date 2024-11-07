@@ -314,7 +314,8 @@ namespace FlexKit
 							}).
 						AddDepthStencilState({
 								.depthEnable	= false,
-								.stencilEnable	= false
+								.depthFunc		= FlexKit::EComparison::EQUAL,
+								.stencilEnable	= false,
 							}).
 						AddDepthStencilFormat(DeviceFormat::D32_FLOAT).
 						Build(*renderSystem);
@@ -359,7 +360,7 @@ namespace FlexKit
 		if (buffer != InvalidHandle)
 			renderSystem.ReleaseResource(buffer);
 
-		auto size	= 128 * MEGABYTE;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
+		auto size	= 64 * MEGABYTE;//Max(8, GetCBTSizeBytes(description.maxDepth, description.cbtTreeCount) + 1);
 		buffer		= renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(size));
 		maxDepth	= description.maxDepth;
 		bufferSize	= size;
@@ -420,7 +421,7 @@ namespace FlexKit
 					constants.start_OUT	= GetBitOffset(ipow(2, maxDepth - 1 - i));
 
 					ctx.SetComputeConstantValue(1, 6, &constants);
-					ctx.Dispatch({ steps / 64 + 1, 1, 1 });
+					ctx.Dispatch({ steps / 1024 + (steps % 1024 != 0 ? 1 : 0), 1, 1 });
 
 					ctx.AddUAVBarrier(handler.GetResource(args.buffer), -1, DeviceLayout_Unknown, Sync_Compute, Sync_Compute);
 

@@ -68,47 +68,42 @@ bool Intersects(const in Frustum frustum, const in AABB aabb)
 	return true;
 }
 
+
+bool Intersects(const in Frustum frustum, const in float3x3 tri)
+{
+	AABB aabb;
+	aabb.min = float3(
+		min(min(tri[0].x, tri[1].x), tri[2].x),
+		min(min(tri[0].y, tri[1].y), tri[2].y),
+		min(min(tri[0].z, tri[1].z), tri[2].z));
+
+	aabb.max = float3(
+		max(max(tri[0].x, tri[1].x), tri[2].x),
+		max(max(tri[0].y, tri[1].y), tri[2].y),
+		max(max(tri[0].z, tri[1].z), tri[2].z));
+	
+	return Intersects(frustum, aabb);
+}
+
+
 float TriangleLevelOfDetail_Perspective(in const float3x3 verts)
 {
-	const float3	v0 = mul(view, float4(verts[0], 1)).xyz;
-	const float3	v2 = mul(view, float4(verts[2], 1)).xyz;
+	const float3	v0 = verts[0];
+	const float3	v2 = verts[2];
 	
 	const float3	edgeCenter = (v0 + v2) / 2; 
 	const float3	edgeVector = (v2 - v0);
 	const float		distanceToEdgeSqr	= dot(edgeCenter, edgeCenter);
 	const float		edgeLengthSqr		= dot(edgeVector, edgeVector);
 
-	return 11.04509354 + log2(edgeLengthSqr / distanceToEdgeSqr);
+	return 16.04509354 + log2(edgeLengthSqr / distanceToEdgeSqr);
 }
 
-[RootSignature(RS_DEBUGVIS)]
-[NumThreads(64, 1, 1)]
-void UpdateAdaptiveTerrain(const uint tid : SV_DispatchThreadID)
+
+float3x3 DecodeTrianglePointsVS(uint32_t heapID, in float4x3 IN_points, in float4x3 IN_texcoord)
 {
-	if (tid >= nodeCount)
-		return;
-	
-	const float ar = 10.0f * 9.0f / 16.0f;
-	
-	const float3 IN_points[] =
-	{
-		float3(-20.0f, 0.0f,  20.0f),
-		float3(-20.0f, 0.0f, -20.0f),
-		float3( 20.0f, 0.0f, -20.0f),
-		float3( 20.0f, 0.0f,  20.0f),
-	};
-	
-	const float3 IN_texcoord[] =
-	{
-		float3(0.0f, 1.0f, 0.0f),
-		float3(0.0f, 0.0f, 0.0f),
-		float3(1.0f, 0.0f, 0.0f),
-		float3(1.0f, 1.0f, 0.0f),
-	};
-	
-	const uint	heapID	= DecodeNode(CBTBuffer, maxDepth, tid);
-	float3x3	points;
-	float3x3	UVs;
+	float3x3 points;
+	float3x3 UVs;
 	
 	if (GetBitValue(heapID, FindMSB(heapID) - 1) != 0)
 	{
@@ -143,46 +138,77 @@ void UpdateAdaptiveTerrain(const uint tid : SV_DispatchThreadID)
 	const float3x3 UV	= mul(m, UVs);
 	const float3x3 tri	= mul(m, points);
 	
-	const float h0	= -10.0f + 10.0f * sqrt(heightMap.SampleLevel(bilinear, UV[0], 0));
-	const float h1	= -10.0f + 10.0f * sqrt(heightMap.SampleLevel(bilinear, UV[1], 0));
-	const float h2	= -10.0f + 10.0f * sqrt(heightMap.SampleLevel(bilinear, UV[2], 0));
+	tri[0].y = -10.0f + 10.0f * sqrt(heightMap.SampleLevel(bilinear, UV[0], 0));
+	tri[1].y = -10.0f + 10.0f * sqrt(heightMap.SampleLevel(bilinear, UV[1], 0));
+	tri[2].y = -10.0f + 10.0f * sqrt(heightMap.SampleLevel(bilinear, UV[2], 0));
 	
-	tri[0].y = h0;
-	tri[1].y = h1;
-	tri[2].y = h2;
+	return float3x3(
+			mul(view, float4(tri[0].xyz, 1.0f)).xyz,
+			mul(view, float4(tri[1].xyz, 1.0f)).xyz,
+			mul(view, float4(tri[2].xyz, 1.0f)).xyz);
+	}
+
+
+[RootSignature(RS_DEBUGVIS)]
+[NumThreads(1024, 1, 1)]
+void UpdateAdaptiveTerrain(const uint tid : SV_DispatchThreadID)
+{
+	if (tid >= nodeCount)
+		return;
 	
-	float4 VSTri[3] = {
-		mul(view, float4(tri[0].xyz, 1.0f)),
-		mul(view, float4(tri[1].xyz, 1.0f)),
-		mul(view, float4(tri[2].xyz, 1.0f)),
+	const float ar = 10.0f * 9.0f / 16.0f;
+	
+	const float4x3 IN_points =
+	{
+		float3(-100.0f, 0.0f,  100.0f),
+		float3(-100.0f, 0.0f, -100.0f),
+		float3( 100.0f, 0.0f, -100.0f),
+		float3( 100.0f, 0.0f,  100.0f),
 	};
 	
-	AABB aabb;
-	aabb.min = float3(
-		min(min(VSTri[0].x, VSTri[1].x), VSTri[2].x),
-		min(min(VSTri[0].y, VSTri[1].y), VSTri[2].y),
-		min(min(VSTri[0].z, VSTri[1].z), VSTri[2].z));
-
-	aabb.max = float3(
-		max(max(VSTri[0].x, VSTri[1].x), VSTri[2].x),
-		max(max(VSTri[0].y, VSTri[1].y), VSTri[2].y),
-		max(max(VSTri[0].z, VSTri[1].z), VSTri[2].z));
-	
-	// split
-	if (FindMSB(heapID) < maxDepth && Intersects(f, aabb) && TriangleLevelOfDetail_Perspective(tri) > 1.0f)
+	const float4x3 IN_texcoord =
 	{
-		SetBit(CBTBuffer, HeapToBitIndex(heapID * 2 + 1, maxDepth), true, maxDepth);
+		float3(0.0f, 1.0f, 0.0f),
+		float3(0.0f, 0.0f, 0.0f),
+		float3(1.0f, 0.0f, 0.0f),
+		float3(1.0f, 1.0f, 0.0f),
+	};
+	
+	const uint	heapID	= DecodeNode(CBTBuffer, maxDepth, tid);
+	if(heapID <= 3)
+		return;
+	
+	const float3x3 TriVS = DecodeTrianglePointsVS(heapID, IN_points, IN_texcoord);
+	
+	if (Intersects(f, TriVS))
+	{
+		const float lodLevel = TriangleLevelOfDetail_Perspective(TriVS);
 		
-		uint parentID = LEBQuadNeighbors(heapID).z;
-		while (parentID > 3)
+		if (FindMSB(heapID) < maxDepth && lodLevel > 1.0f)
 		{
-			SetBit(CBTBuffer, HeapToBitIndex(parentID * 2,		maxDepth), true, maxDepth);
-			SetBit(CBTBuffer, HeapToBitIndex(parentID * 2 + 1,	maxDepth), true, maxDepth);
-			parentID = parentID / 2;
-			
-			SetBit(CBTBuffer, HeapToBitIndex(parentID * 2,		maxDepth), true, maxDepth);
-			SetBit(CBTBuffer, HeapToBitIndex(parentID * 2 + 1,	maxDepth), true, maxDepth);
-			parentID = LEBQuadNeighbors(parentID).z;
+			Split(CBTBuffer, heapID, maxDepth);
 		}
+		else
+		{
+			const uint parent		= heapID / 2;
+			const uint edgeNeighbor = LEBQuadNeighbors(parent).edge;
+		
+			bool mergeBase	= TriangleLevelOfDetail_Perspective(DecodeTrianglePointsVS(parent,			IN_points, IN_texcoord))  < 1.0f;
+			bool mergeTop	= TriangleLevelOfDetail_Perspective(DecodeTrianglePointsVS(edgeNeighbor,	IN_points, IN_texcoord))  < 1.0f;
+		
+			if(mergeBase && mergeTop)
+				Merge(CBTBuffer, heapID, maxDepth);
+		}
+	}
+	else
+	{
+		const uint parent		= heapID / 2;
+		const uint edgeNeighbor = LEBQuadNeighbors(parent).edge;
+		
+		const bool mergeBase	= !Intersects(f, DecodeTrianglePointsVS(parent,			IN_points, IN_texcoord));
+		const bool mergeTop		= !Intersects(f, DecodeTrianglePointsVS(edgeNeighbor,	IN_points, IN_texcoord));
+		
+		if(mergeBase && mergeTop)
+			Merge(CBTBuffer, heapID, maxDepth);
 	}
 }

@@ -17,7 +17,7 @@ void AdaptiveUpdateGetArgs()
 	const uint nodeCount = GetHeapValue(CBTBuffer, maxDepth, 1);
 	
 	argumentsOut[0] = nodeCount;
-	argumentsOut[1] = nodeCount / 64 + 1;
+	argumentsOut[1] = nodeCount / 1024 + 1;
 	argumentsOut[2] = 1;
 	argumentsOut[3] = 1;
 }

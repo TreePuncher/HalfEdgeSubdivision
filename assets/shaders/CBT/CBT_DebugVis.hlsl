@@ -28,14 +28,13 @@ struct Vertex
 Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 {	
 	const uint tid	= (vertexID / 3);
-	const float a	= 10.0f * 9.0f / 16.0f;
 	
 	const float3 IN_points[] =
 	{
-		float3(-20.0f, 0.0f,  20.0f),
-		float3(-20.0f, 0.0f, -20.0f),
-		float3( 20.0f, 0.0f, -20.0f),
-		float3( 20.0f, 0.0f,  20.0f),
+		float3(-100.0f, 0.0f,  100.0f),
+		float3(-100.0f, 0.0f, -100.0f),
+		float3( 100.0f, 0.0f, -100.0f),
+		float3( 100.0f, 0.0f,  100.0f),
 	};
 	
 	const float3 IN_texcoord[] =
@@ -99,21 +98,30 @@ Vertex DrawCBT_VS(const uint vertexID : SV_VertexID)
 
 float4 DrawCBT_PS1(Vertex v) : SV_Target
 {
-	//return float4(v.texcoord, 0, 1);// float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
-	//return float4(colors[v.heapID % 4] * heightMap.Sample(bilinear, v.texcoord), 1);
-	//return float4(float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
+	uint width;
+	uint height;
+	heightMap.GetDimensions(width, height);
 	
-	static const float3 colors[] =
-	{
-		float3(1, 0, 0),
-		float3(0, 1, 0),
-		float3(1, 0, 1),
-		float3(0, 0, 1),
-		float3(1, 1, 1),
-	};
+	const float dU = 10.0f / width;
+	const float dV = 10.0f / height;
+	const float s0 = heightMap.Sample(bilinear, v.texcoord + float2(-dU,  0));
+	const float s1 = heightMap.Sample(bilinear, v.texcoord + float2( dU, 0));
+	const float s2 = heightMap.Sample(bilinear, v.texcoord + float2( 0,  -dV));
+	const float s3 = heightMap.Sample(bilinear, v.texcoord + float2( 0,  -dV));
 	
-	return float4(colors[v.heapID % 5], 1);// * heightMap.Sample(bilinear, v.texcoord), 1);
+	const float sX = s1 - s0;
+	const float sY = s3 - s2;
+	
+	float3 n = normalize(
+	float3(
+		float2(
+			3.0f * 0.03f / dU * 0.5f * -sX, 
+			3.0f * 0.03f / dV * 0.5f * -sY), 
+		1)).xzy;
+
+	return float4(dot(n, float3(0, 1, 0)) * float3(0.8, 0.8, 0.8), 1);
 }
+
 
 float4 DrawCBT_PS2(Vertex v) : SV_Target
 {
@@ -127,8 +135,4 @@ float4 DrawCBT_PS2(Vertex v) : SV_Target
 	};
 	
 	return float4(0, 0, 0, 1);
-	//return float4(v.texcoord, 0, 1);// float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
-	//return float4(colors[v.heapID % 5], 1);// * heightMap.Sample(bilinear, v.texcoord), 1);
-	//return float4(float3(1, 1, 1) * heightMap.Sample(bilinear, v.texcoord), 1);
-
 }
