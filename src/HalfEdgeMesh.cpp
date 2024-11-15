@@ -33,7 +33,7 @@ namespace FlexKit
 		FlexKit::Vector<FlexKit::uint2> faces{ IN_allocator };
 		faces.reserve(shape.wFaces.size());
 		for (const auto& face : shape.wFaces)
-			faces.emplace_back(face.edgeStart, face.GetEdgeCount(shape));
+			faces.emplace_back(face.edgeStart, (uint32_t)face.GetEdgeCount(shape));
 
 		FlexKit::Vector<XYZ> meshPoints{ IN_allocator };
 		meshPoints.resize(shape.wVertices.size());
