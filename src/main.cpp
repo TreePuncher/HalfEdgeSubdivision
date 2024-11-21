@@ -1,8 +1,6 @@
 #include "TestComponent.hpp"
 #include "HalfEdgeMesh.hpp"
 
-#include "CBTTerrain.hpp"
-
 #include <Application.hpp>
 #include <atomic>
 #include <CameraUtilities.hpp>
@@ -83,8 +81,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 									in_framework.core.GetBlockMemory() },
 		cameras					{ in_framework.core.GetBlockMemory() },
 		triggers				{ in_framework.core.GetBlockMemory(), in_framework.core.GetBlockMemory() },
-		depthBuffer				{ in_framework.GetRenderSystem(), { 1920, 1080 } },
-		terrain					{ in_framework.core.GetBlockMemory(), in_framework.GetRenderSystem() }
+		depthBuffer				{ in_framework.GetRenderSystem(), { 1920, 1080 } }
 	{
 		using namespace FlexKit;
 
@@ -110,7 +107,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph)
 			{
-				terrain.Upload(frameGraph);
 			});
 
 		ModifiableShape shape{};
@@ -140,25 +136,24 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		HEMesh = std::make_unique<HalfEdgeMesh>(
 							shape,
 							framework.GetRenderSystem(), 
-							framework.core.GetBlockMemory());
+							framework.core.GetBlockMemory(), 
+							framework.core.GetTempMemory());
 
-		//runOnce.push_back(
-		//	[&](FlexKit::FrameGraph& frameGraph) 
-		//	{
-		//		HEMesh->BuildSubDivLevel(frameGraph);
-		//	});
+		runOnce.push_back(
+			[&](FlexKit::FrameGraph& frameGraph) 
+			{
+				HEMesh->BuildAllSubDivLevel(frameGraph);
+			});
 
 		auto& cameraNode	= camera.AddView<SceneNodeView>();
 		auto& orbitCamera	= camera.AddView<OrbitCameraBehavior>();
 
 		orbitCamera.acceleration = 500.0f;
-		orbitCamera.TranslateWorld({  0, 5.0f, 0 });
+		orbitCamera.TranslateWorld({  0.0f, 0.0f, 5.0f });
 		orbitCamera.SetCameraFOV(0.523599);
 		orbitCamera.SetCameraAspectRatio(1920.0f / 1080.0f);
 
 		activeCamera = orbitCamera;
-
-		terrain.LoadHeightMapFromPath("assets\\HeightMap.png");
 	}
 
 
@@ -266,12 +261,8 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		if (auto orbitCamera = camera.GetView<FlexKit::OrbitCameraBehavior>(); orbitCamera)
 			transformUpdate.AddInput(QueueOrbitCameraUpdateTask(dispatcher, *orbitCamera, renderWindow->mouseState, dT));
 
-		if (adaptiveLOD)
-			terrain.AdaptiveLODUpdate(activeCamera, constBufferAllocator, frameGraph, dT);
-		terrain.Render(activeCamera, &cameraUpdate, renderWindow->GetBackBuffer(), depthTarget, dispatcher, dT, frameGraph);
-
-		//if(HEMesh && activeCamera != FlexKit::InvalidHandle)
-		//	HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer());
+		if(HEMesh && activeCamera != FlexKit::InvalidHandle)
+			HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer());
 
 		PresentBackBuffer(frameGraph, renderWindow->GetBackBuffer());
 
@@ -308,7 +299,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			case FlexKit::KC_SPACE:
 				if (evt.Action == FlexKit::Event::Release)
 				{
-					terrain.wireframe = !terrain.wireframe;
 					return true;
 				}
 				break;
@@ -363,7 +353,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 	TestComponent					testComponent;
 	TestMultiFieldComponent			complexComponent;
 
-	FlexKit::CBTTerain						terrain;
 	std::unique_ptr<FlexKit::HalfEdgeMesh>	HEMesh;
 
 	FlexKit::CameraHandle		activeCamera = FlexKit::InvalidHandle;

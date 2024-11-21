@@ -3,6 +3,7 @@
 #include <FrameGraph.hpp>
 #include <Graphics.hpp>
 #include <ModifiableShape.hpp>
+#include <LibraryBuilder.hpp>
 
 namespace FlexKit
 {
@@ -34,35 +35,43 @@ namespace FlexKit
 		HalfEdgeMesh(
 			const	ModifiableShape&	shape,
 					RenderSystem&		IN_renderSystem, 
-					iAllocator&		IN_allocator);
+					iAllocator&			IN_allocator, 
+					iAllocator&			IN_temp);
 
 
 		~HalfEdgeMesh();
 
 
 		void BuildSubDivLevel(FlexKit::FrameGraph& frameGraph);
+		void BuildAllSubDivLevel(FlexKit::FrameGraph& frameGraph);
 
-
+		
 		/************************************************************************************************/
 
 
 		void DrawSubDivLevel_DEBUG(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget);
 
 		static constexpr PSOHandle EdgeUpdate		= PSOHandle{ GetTypeGUID(HEEdgeUpdate) };
-		static constexpr PSOHandle FaceInitiate		= PSOHandle{ GetTypeGUID(HEFaceInitiate) };
+		static constexpr PSOHandle BuildBisectors	= PSOHandle{ GetTypeGUID(HEBuildBisectors) };
+		static constexpr PSOHandle BuildLevel		= PSOHandle{ GetTypeGUID(HEBuildLevel) };
 		static constexpr PSOHandle FacePass			= PSOHandle{ GetTypeGUID(HEFacePass) };
 		static constexpr PSOHandle VertexUpdate		= PSOHandle{ GetTypeGUID(HEVertexUpdate) };
 		static constexpr PSOHandle RenderFaces		= PSOHandle{ GetTypeGUID(HERenderFaces) };
-
+		
+		inline static GPUStateObject_ptr	updateState		= nullptr;
+		inline static RootSignature*		globalRoot		= nullptr;
+		inline static uint32_t				entryPointIdx	= -1;
+		inline static ProgramIdentifier		programID;
 
 		uint32_t			controlCageSize		= 0;
 		uint32_t			controlCageFaces	= 0;
 		ResourceHandle		controlFaces		= InvalidHandle;
 		ResourceHandle		controlCage			= InvalidHandle;
 		ResourceHandle		controlPoints		= InvalidHandle;
-		ResourceHandle		levels[2]			= { InvalidHandle, InvalidHandle };
-		ResourceHandle		points[2]			= { InvalidHandle, InvalidHandle };
-		uint32_t			edgeCount[2]		= { 0, 0 };
+		ResourceHandle		levels[3]			= { InvalidHandle, InvalidHandle, InvalidHandle };
+		ResourceHandle		points[3]			= { InvalidHandle, InvalidHandle, InvalidHandle };
+		uint32_t			edgeCount[3]		= { 0, 0, 0 };
+		uint32_t			patchCount[3]		= { 0, 0, 0 };
 		uint8_t				levelsBuilt			= 0;
 		CBTBuffer			cbt;
 	};
