@@ -26,11 +26,12 @@ namespace FlexKit
 
 	struct HalfEdgeMesh
 	{
-		struct XYZ
+		struct HalfEdgeVertex
 		{
-			float xyz[3];
+			float	xyz[3];
+			uint4_8	rgba;
+			float2	UV;
 		};
-
 
 		HalfEdgeMesh(
 			const	ModifiableShape&	shape,

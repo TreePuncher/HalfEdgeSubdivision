@@ -41,10 +41,16 @@ namespace FlexKit
 			edgeCount += (uint32_t)face.GetEdgeCount(shape);
 		}
 		
-		Vector<XYZ> meshPoints{ IN_allocator };
+		Vector<HalfEdgeVertex> meshPoints{ IN_allocator };
 		meshPoints.resize(shape.wVertices.size());
 		for (const auto&& [idx, point] : std::views::enumerate(shape.wVertices))
-			memcpy(meshPoints.data() + idx, &point, sizeof(XYZ));
+		{
+			HalfEdgeVertex v;
+			v.rgba = 0xff00ff00;
+			v.UV   = float2(0.0f, 0.0f);
+			memcpy(&v.xyz, &point, sizeof(HalfEdgeVertex));
+			meshPoints[idx] = v;
+		}
 
 		controlFaces		= IN_renderSystem.CreateGPUResource(GPUResourceDesc::StructuredResource(faces.ByteSize()));
 		controlCage			= IN_renderSystem.CreateGPUResource(GPUResourceDesc::StructuredResource(halfEdges.ByteSize()));
@@ -58,9 +64,9 @@ namespace FlexKit
 		levels[0] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(halfEdges.ByteSize() * 4));
 		levels[1] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(halfEdges.ByteSize() * 16));
 		levels[2] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(halfEdges.ByteSize() * 64));
-		points[0] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(level0PointCount * sizeof(XYZ)));
-		points[1] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(level1PointCount * sizeof(XYZ)));
-		points[2] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(level2PointCount * sizeof(XYZ)));
+		points[0] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(level0PointCount * sizeof(HalfEdgeVertex)));
+		points[1] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(level1PointCount * sizeof(HalfEdgeVertex)));
+		points[2] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(level2PointCount * sizeof(HalfEdgeVertex)));
 
 		patchCount[0] = edgeCount;
 		patchCount[1] = patchCount[0] * 4;
@@ -373,7 +379,7 @@ namespace FlexKit
 					cages.SetUAVStructured(ctx, idx, resources.GetResource(cage), 16);
 	
 				for (auto&& [idx, p] : enumerate(subDivData.outputVerts))
-					points.SetUAVStructured(ctx, idx, resources.GetResource(p), 12);
+					points.SetUAVStructured(ctx, idx, resources.GetResource(p), sizeof(HalfEdgeVertex));
 
 				ctx.SetComputeDescriptorTable(4, cages); // cages
 				ctx.SetComputeDescriptorTable(5, points); // points
@@ -418,8 +424,8 @@ namespace FlexKit
 					builder.AddDataDependency(*update);
 
 				visData.renderTarget	= builder.RenderTarget(renderTarget);
-				visData.inputCage		= builder.NonPixelShaderResource(levels[2]);
-				visData.inputVerts		= builder.NonPixelShaderResource(points[2]);
+				visData.inputCage		= builder.NonPixelShaderResource(levels[0]);
+				visData.inputVerts		= builder.NonPixelShaderResource(points[0]);
 			},
 			[this, camera](DrawLevel& visData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
@@ -427,15 +433,15 @@ namespace FlexKit
 
 				RenderTargetList renderTargets = { resources.RenderTarget(visData.renderTarget, ctx) };
 				ctx.SetGraphicsPipelineState(RenderFaces, threadLocalAllocator);
-				ctx.SetGraphicsShaderResourceView(0, resources.NonPixelShaderResource(visData.inputCage, ctx));
-				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(visData.inputVerts, ctx));
+				ctx.SetGraphicsShaderResourceView(0, resources.NonPixelShaderResource(visData.inputCage, ctx, Sync_Compute, Sync_Compute));
+				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(visData.inputVerts, ctx, Sync_Compute, Sync_Compute));
 
 				struct {
 					float4x4_GPU	PV;
 					uint32_t		patchCount;
 				}	constants{
 						.PV			= GetCameraConstants(camera).PV,
-						.patchCount = patchCount[2]
+						.patchCount = patchCount[0]
 				};
 
 				ctx.SetGraphicsConstantValue(2, 17, &constants);

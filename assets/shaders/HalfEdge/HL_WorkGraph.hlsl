@@ -6,12 +6,29 @@ struct HalfEdge
 	uint32_t	vert;
 };
 
+struct Vertex
+{
+	float3	xyz;
+	uint	color;
+	float2  UV;
+};
+
+Vertex MakeVertex(float3 xyz, uint color = 0, float2 UV = float2(0, 0))
+{
+	Vertex v;
+	v.xyz	= xyz;
+	v.color	= color;
+	v.UV	= UV;
+	
+	return v;
+}
+
 StructuredBuffer<HalfEdge>	inputCage	: register(t0);
-StructuredBuffer<float3>	inputPoints	: register(t1);
+StructuredBuffer<Vertex>	inputPoints : register(t1);
 StructuredBuffer<uint2>		inputFaces	: register(t2);
 
 globallycoherent RWStructuredBuffer<HalfEdge>	cages[]		: register(u0, space1);
-globallycoherent RWStructuredBuffer<float3>		points[]	: register(u0, space2);
+globallycoherent RWStructuredBuffer<Vertex>		points[]	: register(u0, space2);
 
 struct SubdivisionInit
 {
@@ -100,11 +117,13 @@ void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, i
 		edge3.vert = idx + (vertexCount - 2 + 2 * i) % (vertexCount - 1);
 		cages[outputDest][outputIdx + 3] = edge3;
 
-		facePoint += inputPoints[he.vert];
+		facePoint += inputPoints[he.vert].xyz;
 		edgeItr		= he.next;
 		
-		points[outputDest][idx + 2 * i + 0] = inputPoints[he.vert];
-		points[outputDest][idx + 2 * i + 1] = (inputPoints[he.vert] + inputPoints[inputCage[he.next].vert]) / 2;
+		points[outputDest][idx + 2 * i + 0] = MakeVertex(inputPoints[he.vert].xyz, 0);
+		points[outputDest][idx + 2 * i + 1] = MakeVertex(
+												(inputPoints[he.vert].xyz + 
+												 inputPoints[inputCage[he.next].vert].xyz) / 2, 1);
 		
 		i++;
 		
@@ -112,7 +131,7 @@ void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, i
 			return;
 	}
 
-	points[outputDest][idx + vertexCount - 1] = facePoint / beginCount.y;
+	points[outputDest][idx + vertexCount - 1] = MakeVertex(facePoint / beginCount.y, 3);
 }
 
 
