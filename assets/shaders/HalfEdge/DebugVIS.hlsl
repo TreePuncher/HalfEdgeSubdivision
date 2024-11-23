@@ -56,18 +56,18 @@ VertexOut MakeVert(in Vertex v, uint patchID)
 {
 	static float3 colors[] =
 	{
-		float3(1, 0, 0),
-		float3(0, 1, 0),
-		float3(0, 0, 1),
-		float3(1, 0, 1),
-		float3(1, 1, 1),
+		float3(1, 0, 0),  // 0
+		float3(0, 1, 0),  // 1
+		float3(0, 0, 1),  // 2
+		float3(1, 0, 1),  // 3
+		float3(1, 1, 1),  // 4
 		float3(0, 1, 1),
 		float3(0.25f, 0.25f, 0.25f),
 	};
 
 	
 	VertexOut VOut;
-	VOut.v			= mul(PV, float4(v.xyz.xzy, 1));
+	VOut.v			= mul(PV, float4(v.xyz, 1));
 	VOut.patchID	= patchID;
 	VOut.color		= float4(colors[v.color % 7], 1);
 	

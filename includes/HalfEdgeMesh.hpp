@@ -50,7 +50,7 @@ namespace FlexKit
 		/************************************************************************************************/
 
 
-		void DrawSubDivLevel_DEBUG(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget);
+		void DrawSubDivLevel_DEBUG(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget, uint32_t targetLevel = 0);
 
 		static constexpr PSOHandle EdgeUpdate		= PSOHandle{ GetTypeGUID(HEEdgeUpdate) };
 		static constexpr PSOHandle BuildBisectors	= PSOHandle{ GetTypeGUID(HEBuildBisectors) };

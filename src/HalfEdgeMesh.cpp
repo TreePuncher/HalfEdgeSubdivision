@@ -19,9 +19,11 @@ namespace FlexKit
 		halfEdges.reserve(shape.wEdges.size());
 		for (const auto&& [idx, edge] : std::views::enumerate(shape.wEdges))
 		{
+			auto t = shape.IsEdgeVertex(edge.vertices[0]);
+			
 			HEEdge hEdge
 			{
-				.twin = edge.twin,
+				.twin = shape.IsEdgeVertex(edge.vertices[0]) ? (edge.twin & (0xffffffff >> 1)) | (1 << 31) : (edge.twin & (0xffffffff >> 1)),
 				.next = edge.next,
 				.prev = edge.prev,
 				.vert = edge.vertices[0],
@@ -162,7 +164,7 @@ namespace FlexKit
 						return FlexKit::PipelineBuilder{ allocator }.
 							AddMeshShader("MeshMain",	"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
 							AddPixelShader("PMain",		"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
-							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::BACK }).
+							AddRasterizerState({ .fill = FlexKit::EFillMode::WIREFRAME, .CullMode = FlexKit::ECullMode::NONE }).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
 									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).
@@ -271,7 +273,7 @@ namespace FlexKit
 					subDivData.inputCage		= builder.NonPixelShaderResource(levels[levelsBuilt - 1]);
 					subDivData.inputVerts		= builder.NonPixelShaderResource(points[levelsBuilt - 1]);
 					subDivData.inputEdgeCount	= controlCageSize;
-					subDivData.faceCount		= 7;//controlCageFaces << (levelsBuilt * 2);
+					subDivData.faceCount		= 10;//controlCageFaces << (levelsBuilt * 2);
 					edgeCount[levelsBuilt]		= edgeCount[levelsBuilt - 1] * 4;
 
 					subDivData.outputCage		= builder.UnorderedAccess(levels[levelsBuilt]);
@@ -404,7 +406,7 @@ namespace FlexKit
 	/************************************************************************************************/
 
 
-	void HalfEdgeMesh::DrawSubDivLevel_DEBUG(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget)
+	void HalfEdgeMesh::DrawSubDivLevel_DEBUG(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget, uint32_t targetLevel)
 	{
 		if (levelsBuilt == 0)
 			return;
@@ -424,10 +426,10 @@ namespace FlexKit
 					builder.AddDataDependency(*update);
 
 				visData.renderTarget	= builder.RenderTarget(renderTarget);
-				visData.inputCage		= builder.NonPixelShaderResource(levels[0]);
-				visData.inputVerts		= builder.NonPixelShaderResource(points[0]);
+				visData.inputCage		= builder.NonPixelShaderResource(levels[targetLevel]);
+				visData.inputVerts		= builder.NonPixelShaderResource(points[targetLevel]);
 			},
-			[this, camera](DrawLevel& visData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
+			[this, camera, targetLevel](DrawLevel& visData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
 				ctx.BeginEvent_DEBUG("Draw HE Mesh");
 
@@ -441,7 +443,7 @@ namespace FlexKit
 					uint32_t		patchCount;
 				}	constants{
 						.PV			= GetCameraConstants(camera).PV,
-						.patchCount = patchCount[0]
+						.patchCount = patchCount[targetLevel]
 				};
 
 				ctx.SetGraphicsConstantValue(2, 17, &constants);

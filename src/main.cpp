@@ -112,26 +112,25 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		ModifiableShape shape{};
 
 		const uint32_t face0[] = {
-			shape.AddVertex({   0.0f, 0.0f, -0.9f }),
-			shape.AddVertex({  -0.9f, 0.0f,  0.0f }),
-			shape.AddVertex({   0.0f, 0.0f,  0.9f }) 
+			shape.AddVertex({   0.0f, -0.9f, 0.0f }),
+			shape.AddVertex({  -1.9f,  0.0f, 0.0f }),
+			shape.AddVertex({   0.0f,  0.9f, 0.0f }) 
 		};
 		const uint32_t face1[] = {
 			face0[0], face0[2],
-			shape.AddVertex({  0.9f, 0.0f,  0.9f }),
-			shape.AddVertex({  0.9f, 0.0f, -0.9f })
+			shape.AddVertex({  0.9f,  0.9f, 0.0f }),
+			shape.AddVertex({  0.9f, -0.9f, 0.0f })
 		};
 
-		//const uint32_t face2[] = {
-		//	shape.AddVertex({ -0.9f,  0.9f, 0 }),
-		//	shape.AddVertex({  0.9f,  0.9f, 0 }),
-		//	shape.AddVertex({  0.9f, -0.9f, 0 }),
-		//	shape.AddVertex({ -0.9f, -0.9f, 0 })
-		//};
+		const uint32_t face2[] = {
+			face0[0], 
+			face1[3],
+			shape.AddVertex({  0.0f, -1.0f, 0.0f }),
+		};
 
 		shape.AddPolygon(face0, face0 + 3);
 		shape.AddPolygon(face1, face1 + 4);
-		//shape.AddPolygon(face2, face2 + 4);
+		//shape.AddPolygon(face2, face2 + 3);
 
 		HEMesh = std::make_unique<HalfEdgeMesh>(
 							shape,
