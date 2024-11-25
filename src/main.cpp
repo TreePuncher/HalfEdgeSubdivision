@@ -149,7 +149,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		auto& cameraNode	= camera.AddView<SceneNodeView>();
 		auto& orbitCamera	= camera.AddView<OrbitCameraBehavior>();
 
-		orbitCamera.acceleration = 500.0f;
+		orbitCamera.acceleration = 50.0f;
 		orbitCamera.TranslateWorld({  0.0f, 0.0f, 5.0f });
 		orbitCamera.SetCameraFOV(0.523599);
 		orbitCamera.SetCameraAspectRatio(1920.0f / 1080.0f);

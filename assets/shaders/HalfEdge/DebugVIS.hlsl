@@ -62,7 +62,7 @@ VertexOut MakeVert(in Vertex v, uint patchID)
 		float3(1, 0, 1),  // 3
 		float3(1, 1, 1),  // 4
 		float3(0, 1, 1),
-		float3(0.25f, 0.25f, 0.25f),
+		float3(0.75f, 0.75f, 0.75f),
 	};
 
 	

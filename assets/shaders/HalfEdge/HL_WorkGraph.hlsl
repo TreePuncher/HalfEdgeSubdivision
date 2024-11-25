@@ -46,11 +46,19 @@ Vertex MakeVertex(float3 xyz, uint color = 0, float2 UV = float2(0, 0))
 	return v;
 }
 
+StructuredBuffer<HalfEdge>	inputCage	: register(t0);
+StructuredBuffer<Vertex>	inputPoints : register(t1);
+StructuredBuffer<uint2>		inputFaces	: register(t2);
+
+globallycoherent RWStructuredBuffer<HalfEdge>	cages[]		: register(u0, space1);
+globallycoherent RWStructuredBuffer<Vertex>		points[]	: register(u0, space2);
+
 
 uint32_t GetFaceVertexIdx(uint32_t halfEdge)
 {
 	return (halfEdge & (~0x3)) | 2;
 }
+
 
 template<typename TY_cage, typename TY_points>
 uint32_t GetTwinFaceVertexIdx(in TY_cage cage, uint32_t halfEdge)
@@ -69,25 +77,54 @@ Vertex GetTwinFaceVertex(in TY_cage cage, in TY_points points, uint32_t halfEdge
 	return points[cage[faceEdge].vert];
 }
 
+template<typename TY_Cage>
+uint32_t Next(in TY_Cage cage, uint32_t idx)
+{
+	return cage[idx].next;
+}
+
+template<typename TY_Cage>
+uint32_t Prev(in TY_Cage cage, uint32_t idx)
+{
+	return cage[idx].prev;
+}
+#if 1
+uint32_t Next(uint32_t idx)
+{
+	return inputCage[idx].next;
+}
+
+uint32_t Prev(uint32_t idx)
+{
+	return inputCage[idx].prev;
+}
+
+#else
+uint32_t Next(uint32_t idx)
+{
+	return (idx & 0xffffffff << 2) | (idx + 1) & 0x3;
+}
+
+uint32_t Prev(uint32_t idx)
+{
+	return (idx & 0xffffffff << 2) | (idx - 1) & 0x3;
+}
+#endif
+
+
 template<typename TY_cage>
 uint32_t RotateSelectionCW(in TY_cage cage, uint32_t halfEdge)
 {
-	return (halfEdge != BORDERVALUE) ? cage[cage[halfEdge].prev].Twin() : BORDERVALUE;
+	return (halfEdge != BORDERVALUE) ? cage[Prev(cage, halfEdge)].Twin() : BORDERVALUE;
 }
+
 
 template<typename TY_cage>
 uint32_t RotateSelectionCCW(in TY_cage cage, uint32_t halfEdge)
 {
 	const uint32_t twin = cage[halfEdge].Twin();
-	return (twin == BORDERVALUE) ? BORDERVALUE : cage[twin].next;
+	return (twin == BORDERVALUE) ? BORDERVALUE : Next(cage, twin);
 }
-
-StructuredBuffer<HalfEdge>	inputCage	: register(t0);
-StructuredBuffer<Vertex>	inputPoints : register(t1);
-StructuredBuffer<uint2>		inputFaces	: register(t2);
-
-globallycoherent RWStructuredBuffer<HalfEdge>	cages[]		: register(u0, space1);
-globallycoherent RWStructuredBuffer<Vertex>		points[]	: register(u0, space2);
 
 struct SubdivisionInit
 {
@@ -160,7 +197,7 @@ void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, i
 		HalfEdge prevEdge	= inputCage[he.prev];
 		
 		HalfEdge edge0;
-		edge0.twin = he.Border() ? BORDERVALUE : (inputCage[he.Twin()].next * 4 + 3);
+		edge0.twin = he.Border() ? BORDERVALUE : (Next(inputCage, he.Twin()) * 4 + 3);
 		edge0.next = outputIdx + 1;
 		edge0.prev = outputIdx + 3;
 		edge0.vert = idx + 2 * i + 0;
@@ -190,7 +227,7 @@ void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, i
 		cages[outputDest][outputIdx + 3] = edge3;
 
 		facePoint += inputPoints[he.vert].xyz;
-		edgeItr		= he.next;
+		edgeItr	   = he.next;
 		
 		points[outputDest][idx + 2 * i + 0] = MakeVertex(inputPoints[he.vert].xyz, 6);
 		points[outputDest][idx + 2 * i + 1] = MakeVertex(
@@ -273,13 +310,39 @@ void CreateInitialEdgePoints(
 	
 	const uint2 beginCount	= inputFaces[threadID];
 	uint32_t edgeItr		= beginCount.x;
-	uint32_t i				= 0;
-	while (i < beginCount.y)
+	HalfEdge he				= inputCage[edgeItr];
+
+	for (uint32_t i = 0; i < beginCount.y; edgeItr = he.next, i++, he = inputCage[edgeItr])
 	{
-		HalfEdge		he			= inputCage[edgeItr];
 		const uint32_t	outEdge		= 1 + 4 * edgeItr;
 		const uint32_t	outVertex	= 0 + 4 * edgeItr;
-		
+
+		if(!he.Border() && !he.IsCorner())
+		{
+			float3 p0	= inputPoints[inputCage[edgeItr].vert].xyz;
+			float3 Q	= points[0][cages[0][GetFaceVertexIdx(outVertex)].vert].xyz;
+			float3 R	= lerp(p0, inputPoints[inputCage[Next(inputCage, edgeItr)].vert].xyz, 0.5);
+			float  n	= 1.0f;
+
+			uint32_t selection	= RotateSelectionCCW(inputCage, edgeItr);
+			while(selection != edgeItr)
+			{
+				n += 1.0f;
+				Q += points[0][cages[0][GetFaceVertexIdx(selection * 4)].vert].xyz;
+				R += lerp(p0, inputPoints[inputCage[Next(inputCage, selection)].vert].xyz, 0.5);
+				selection = RotateSelectionCCW(inputCage, selection);
+			}
+
+			Q /= n;
+			R /= n;
+
+			//points[0][cages[0][outVertex].vert].xyz = Q;
+			//points[0][cages[0][outVertex].vert].xyz = R;
+			points[0][cages[0][outVertex].vert].xyz = (Q + 2 * R + p0 * (n - 3)) / n;
+			points[0][cages[0][outVertex].vert].color =
+n;
+		}
+
 		// Calculate Edge point
 		if(!he.Border())
 		{
@@ -294,16 +357,11 @@ void CreateInitialEdgePoints(
 			const float3 ev0 = points[0][cages[0][outEdge].vert].xyz;
 
 			points[0][cages[0][outEdge].vert].xyz	= (fv0 + fv1) / 4.0f + ev0 / 2.0f;
-			//points[0][cages[0][outEdge].vert].color = 1;
 		}
-		else
-		{
-			//points[0][cages[0][outEdge].vert].color = 1;
-		}
-
+		
 		if(he.IsCorner())
 		{	// Boundry Vertex
-			uint32_t n = 2; 
+			uint32_t n				= 2; 
 			uint32_t prevSelection	= edgeItr;
 			uint32_t selection		= RotateSelectionCCW(inputCage, edgeItr);
 
@@ -330,15 +388,12 @@ void CreateInitialEdgePoints(
 
 			if(n > 2)
 			{
-				const float3 p0 = inputPoints[inputCage[inputCage[selection0].next].vert].xyz;
+				const float3 p0 = inputPoints[inputCage[Next(inputCage, selection0)].vert].xyz;
 				const float3 p1 = inputPoints[he.vert].xyz;
-				const float3 p2 = inputPoints[inputCage[inputCage[selection1].prev].vert].xyz;	
-				points[0][cages[0][outVertex].vert].xyz		= (p0 + 6 * p1 + p2) / 8.0f;
+				const float3 p2 = inputPoints[inputCage[Prev(inputCage, selection1)].vert].xyz;	
+				points[0][cages[0][outVertex].vert].xyz	= (p0 + 6 * p1 + p2) / 8.0f;
 			}
 		}
-
-		edgeItr = he.next;
-		i++;
 	}
 
 	ThreadNodeOutputRecords <CatmullClarkArgs>catmullClarkPoints = CreateInitialVertexPoints.GetThreadNodeOutputRecords(0);
