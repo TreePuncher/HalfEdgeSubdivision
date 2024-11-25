@@ -112,25 +112,27 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		ModifiableShape shape{};
 
 		const uint32_t face0[] = {
-			shape.AddVertex({   0.0f, -0.9f, 0.0f }),
-			shape.AddVertex({  -1.9f,  0.0f, 0.0f }),
-			shape.AddVertex({   0.0f,  0.9f, 0.0f }) 
+			shape.AddVertex({   0.0f, -1.0f,   0.466667f }),
+			shape.AddVertex({  -1.0f, -1.0f,  -0.233333f }),
+			shape.AddVertex({  -1.0f,  0.0f,  -0.7f	 }),
+			shape.AddVertex({   0.0f,  0.0f,  -0.0f	 })
 		};
 		const uint32_t face1[] = {
-			face0[0], face0[2],
-			shape.AddVertex({  0.9f,  0.9f, 0.0f }),
-			shape.AddVertex({  0.9f, -0.9f, 0.0f })
+			face0[0], face0[3],
+			shape.AddVertex({  1.0f,  0.0f, -0.7f }),
+			shape.AddVertex({  1.0f, -1.0f, -0.233333f })
 		};
 
 		const uint32_t face2[] = {
-			face0[0], 
-			face1[3],
-			shape.AddVertex({  0.0f, -1.0f, 0.0f }),
+			face0[3], 
+			face0[2],
+			shape.AddVertex({  0.0f, 0.0f, -1.25f }),
+			face1[2],
 		};
 
-		shape.AddPolygon(face0, face0 + 3);
+		shape.AddPolygon(face0, face0 + 4);
 		shape.AddPolygon(face1, face1 + 4);
-		//shape.AddPolygon(face2, face2 + 3);
+		shape.AddPolygon(face2, face2 + 4);
 
 		HEMesh = std::make_unique<HalfEdgeMesh>(
 							shape,
@@ -261,7 +263,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			transformUpdate.AddInput(QueueOrbitCameraUpdateTask(dispatcher, *orbitCamera, renderWindow->mouseState, dT));
 
 		if(HEMesh && activeCamera != FlexKit::InvalidHandle)
-			HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer());
+			HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer(), depthBuffer.Get());
 
 		PresentBackBuffer(frameGraph, renderWindow->GetBackBuffer());
 

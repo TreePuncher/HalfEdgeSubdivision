@@ -164,10 +164,12 @@ namespace FlexKit
 						return FlexKit::PipelineBuilder{ allocator }.
 							AddMeshShader("MeshMain",	"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
 							AddPixelShader("PMain",		"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
-							AddRasterizerState({ .fill = FlexKit::EFillMode::WIREFRAME, .CullMode = FlexKit::ECullMode::NONE }).
+							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE }).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
 									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).
+							AddDepthStencilFormat(DeviceFormat::D32_FLOAT).
+							AddDepthStencilState({ .depthEnable = true, .depthFunc = EComparison::LESS }).
 							Build(*renderSystem);
 					});
 
@@ -388,12 +390,12 @@ namespace FlexKit
 
 				ctx.DeviceContext->SetProgram(&setProgram);
 
-				uint3 xyz{ 1, 1, 1 };
+				uint4 xyzw{ 1, 1, 1, subDivData.patchCount };
 				D3D12_DISPATCH_GRAPH_DESC dispatch;
 				dispatch.Mode = D3D12_DISPATCH_MODE::D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
 				dispatch.NodeCPUInput.EntrypointIndex		= entryPointIdx;
 				dispatch.NodeCPUInput.NumRecords			= 1;
-				dispatch.NodeCPUInput.pRecords				= &xyz;
+				dispatch.NodeCPUInput.pRecords				= &xyzw;
 				dispatch.NodeCPUInput.RecordStrideInBytes	= 0;
 				ctx.DeviceContext->DispatchGraph(&dispatch);
 
@@ -406,7 +408,7 @@ namespace FlexKit
 	/************************************************************************************************/
 
 
-	void HalfEdgeMesh::DrawSubDivLevel_DEBUG(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget, uint32_t targetLevel)
+	void HalfEdgeMesh::DrawSubDivLevel_DEBUG(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget, ResourceHandle depthTarget, uint32_t targetLevel)
 	{
 		if (levelsBuilt == 0)
 			return;
@@ -414,6 +416,7 @@ namespace FlexKit
 		struct DrawLevel
 		{
 			FrameResourceHandle renderTarget;
+			FrameResourceHandle depthTarget;
 			FrameResourceHandle inputCage;
 			FrameResourceHandle inputVerts;
 		};
@@ -426,6 +429,7 @@ namespace FlexKit
 					builder.AddDataDependency(*update);
 
 				visData.renderTarget	= builder.RenderTarget(renderTarget);
+				visData.depthTarget		= builder.DepthTarget(depthTarget);
 				visData.inputCage		= builder.NonPixelShaderResource(levels[targetLevel]);
 				visData.inputVerts		= builder.NonPixelShaderResource(points[targetLevel]);
 			},
@@ -448,7 +452,7 @@ namespace FlexKit
 
 				ctx.SetGraphicsConstantValue(2, 17, &constants);
 				ctx.SetScissorAndViewports(renderTargets);
-				ctx.SetRenderTargets(renderTargets);
+				ctx.SetRenderTargets(renderTargets, true, resources.GetResource(visData.depthTarget));
 				ctx.DispatchMesh({ 4, 1, 1 });
 
 				ctx.EndEvent_DEBUG();

@@ -69,7 +69,7 @@ VertexOut MakeVert(in Vertex v, uint patchID)
 	VertexOut VOut;
 	VOut.v			= mul(PV, float4(v.xyz, 1));
 	VOut.patchID	= patchID;
-	VOut.color		= float4(colors[v.color % 7], 1);
+	VOut.color		= float4(colors[patchID % 7], 1);
 	
 	return VOut;
 }

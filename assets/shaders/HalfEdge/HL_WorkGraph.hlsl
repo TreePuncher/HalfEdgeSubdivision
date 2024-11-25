@@ -121,6 +121,7 @@ struct CatmullClarkArgs
 struct LaunchParams
 {
 	uint3 dispatchSize : SV_DispatchGrid;
+	uint  patchCount;
 };
 
 [Shader("node")]
@@ -134,8 +135,8 @@ void InitiateBuild(
 {
 	ThreadNodeOutputRecords<SubdivisionInit> buildArgs = BuildBisectorFaces.GetThreadNodeOutputRecords(1);
 	buildArgs.Get().vertexCounter	= 0;
-	buildArgs.Get().remaining		= 3;
-	buildArgs.Get().patchCount		= 3;
+	buildArgs.Get().remaining		= args.Get().patchCount;
+	buildArgs.Get().patchCount		= args.Get().patchCount;
 	buildArgs.Get().newPatches		= 0;
 	buildArgs.Get().dispatchSize	= uint3(1, 1, 1);
 	
@@ -333,7 +334,6 @@ void CreateInitialEdgePoints(
 				const float3 p1 = inputPoints[he.vert].xyz;
 				const float3 p2 = inputPoints[inputCage[inputCage[selection1].prev].vert].xyz;	
 				points[0][cages[0][outVertex].vert].xyz		= (p0 + 6 * p1 + p2) / 8.0f;
-				points[0][cages[0][outVertex].vert].color	= n;
 			}
 		}
 
