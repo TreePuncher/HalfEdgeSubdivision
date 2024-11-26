@@ -128,7 +128,8 @@ namespace FlexKit
 					BuildStateObject();
 
 				programID		= updateState->GetProgramID("HE_Builder");
-				entryPointIdx	= updateState->GetEntryPointIndex("InitiateBuild");
+				initiate		= updateState->GetEntryPointIndex("InitiateBuild");
+				subdivide		= updateState->GetEntryPointIndex("InitiateSubdivision");
 
 				IN_renderSystem.RegisterPSOLoader(
 					BuildBisectors,
@@ -156,7 +157,7 @@ namespace FlexKit
 				//			AddComputeShader("EdgePass", "assets\\shaders\\HalfEdge\\HalfEdge.hlsl", { .hlsl2021 = true }).
 				//			Build(*renderSystem);
 				//	});
-
+				
 				IN_renderSystem.RegisterPSOLoader(
 					RenderFaces,
 					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
@@ -173,9 +174,25 @@ namespace FlexKit
 							Build(*renderSystem);
 					});
 
+				IN_renderSystem.RegisterPSOLoader(
+					RenderWireframe,
+					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
+					{
+						return FlexKit::PipelineBuilder{ allocator }.
+							AddMeshShader("WireMain",			"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
+							AddPixelShader("WhiteWireframe",		"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
+							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE }).
+							AddRenderTargetState(
+								{	.targetCount	= 1,
+									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).
+							AddDepthStencilFormat(DeviceFormat::D32_FLOAT).
+							AddDepthStencilState({ .depthEnable = true, .depthFunc = EComparison::LESS }).
+							Build(*renderSystem);
+					});
+
 				IN_renderSystem.QueuePSOLoad(BuildBisectors);
 				IN_renderSystem.QueuePSOLoad(BuildLevel);
-				//IN_renderSystem.QueuePSOLoad(EdgeUpdate);
+				IN_renderSystem.QueuePSOLoad(RenderWireframe);
 				IN_renderSystem.QueuePSOLoad(RenderFaces);
 
 				return true;
@@ -393,7 +410,7 @@ namespace FlexKit
 				uint4 xyzw{ 1, 1, 1, subDivData.patchCount };
 				D3D12_DISPATCH_GRAPH_DESC dispatch;
 				dispatch.Mode = D3D12_DISPATCH_MODE::D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
-				dispatch.NodeCPUInput.EntrypointIndex		= entryPointIdx;
+				dispatch.NodeCPUInput.EntrypointIndex		= subdivide;
 				dispatch.NodeCPUInput.NumRecords			= 1;
 				dispatch.NodeCPUInput.pRecords				= &xyzw;
 				dispatch.NodeCPUInput.RecordStrideInBytes	= 0;
@@ -438,7 +455,7 @@ namespace FlexKit
 				ctx.BeginEvent_DEBUG("Draw HE Mesh");
 
 				RenderTargetList renderTargets = { resources.RenderTarget(visData.renderTarget, ctx) };
-				ctx.SetGraphicsPipelineState(RenderFaces, threadLocalAllocator);
+				ctx.SetGraphicsPipelineState(RenderWireframe, threadLocalAllocator);
 				ctx.SetGraphicsShaderResourceView(0, resources.NonPixelShaderResource(visData.inputCage, ctx, Sync_Compute, Sync_Compute));
 				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(visData.inputVerts, ctx, Sync_Compute, Sync_Compute));
 

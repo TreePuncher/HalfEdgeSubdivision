@@ -29,6 +29,33 @@ struct HalfEdge
 	}
 };
 
+struct TwinEdge
+{
+	 int32_t twin;
+	uint32_t vert;
+	
+	int32_t Twin()
+	{ 
+		return twin & TWINMASK;
+	}
+	
+	bool Border()
+	{
+		return Twin() == BORDERVALUE;
+	}
+	
+	bool IsCorner()
+	{
+		return (twin & (1 << 31)) != 0;
+	}
+	
+	void MarkCorner(bool f)
+	{
+		twin = Twin() | (f << 31);
+	}
+};
+
+
 struct Vertex
 {
 	float3	xyz;
@@ -50,7 +77,7 @@ StructuredBuffer<HalfEdge>	inputCage	: register(t0);
 StructuredBuffer<Vertex>	inputPoints : register(t1);
 StructuredBuffer<uint2>		inputFaces	: register(t2);
 
-globallycoherent RWStructuredBuffer<HalfEdge>	cages[]		: register(u0, space1);
+globallycoherent RWStructuredBuffer<TwinEdge>	cages[]		: register(u0, space1);
 globallycoherent RWStructuredBuffer<Vertex>		points[]	: register(u0, space2);
 
 
@@ -180,6 +207,33 @@ void InitiateBuild(
 	buildArgs.OutputComplete();
 }
 
+struct LaunchSubdivisionParams
+{
+	uint3 dispatchSize : SV_DispatchGrid;
+	uint patchCount;
+	uint source;
+	uint target;
+};
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NodeDispatchGrid(1, 1, 1)]
+[NumThreads(1, 1, 1)]
+void InitiateSubdivision(
+	DispatchNodeInputRecord<LaunchParams> args,
+	[MaxRecords(1)] NodeOutput<SubdivisionInit>		BuildBisectorFaces,
+					const uint						dispatchThreadID : SV_DispatchThreadID)
+{
+	ThreadNodeOutputRecords<SubdivisionInit> buildArgs = BuildBisectorFaces.GetThreadNodeOutputRecords(1);
+	buildArgs.Get().vertexCounter	= 0;
+	buildArgs.Get().remaining		= args.Get().patchCount;
+	buildArgs.Get().patchCount		= args.Get().patchCount;
+	buildArgs.Get().newPatches		= 0;
+	buildArgs.Get().dispatchSize	= uint3(1, 1, 1);
+	
+	buildArgs.OutputComplete();
+}
+
 
 template<typename TY_points, typename TY_cage>
 void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, in uint2 beginCount, in uint idx, in uint vertexCount)
@@ -196,32 +250,24 @@ void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, i
 		HalfEdge he			= inputCage[edgeItr];
 		HalfEdge prevEdge	= inputCage[he.prev];
 		
-		HalfEdge edge0;
+		TwinEdge edge0;
 		edge0.twin = he.Border() ? BORDERVALUE : (Next(inputCage, he.Twin()) * 4 + 3);
-		edge0.next = outputIdx + 1;
-		edge0.prev = outputIdx + 3;
 		edge0.vert = idx + 2 * i + 0;
 		edge0.MarkCorner(he.IsCorner());
 		cages[outputDest][outputIdx + 0] = edge0;
 
-		HalfEdge edge1;
+		TwinEdge edge1;
 		edge1.twin = (beginCount.x + (beginCount.y + i + 1) % beginCount.y) * 4 + 2;
-		edge1.next = outputIdx + 2;
-		edge1.prev = outputIdx + 0;
 		edge1.vert = idx + 2 * i + 1;
 		cages[outputDest][outputIdx + 1] = edge1;
 		
-		HalfEdge edge2;
+		TwinEdge edge2;
 		edge2.twin = (beginCount.x + (beginCount.y + i - 1) % beginCount.y) * 4 + 1;
-		edge2.next = outputIdx + 3;
-		edge2.prev = outputIdx + 1;
 		edge2.vert = idx + vertexCount - 1;
 		cages[outputDest][outputIdx + 2] = edge2;
 		
-		HalfEdge edge3;
+		TwinEdge edge3;
 		edge3.twin = prevEdge.Border() ? BORDERVALUE : (prevEdge.Twin() * 4);
-		edge3.next = outputIdx + 0;
-		edge3.prev = outputIdx + 2;
 		edge3.vert = idx + (vertexCount - 2 + 2 * i) % (vertexCount - 1);
 		edge3.MarkCorner(prevEdge.IsCorner());
 		cages[outputDest][outputIdx + 3] = edge3;
@@ -336,11 +382,8 @@ void CreateInitialEdgePoints(
 			Q /= n;
 			R /= n;
 
-			//points[0][cages[0][outVertex].vert].xyz = Q;
-			//points[0][cages[0][outVertex].vert].xyz = R;
-			points[0][cages[0][outVertex].vert].xyz = (Q + 2 * R + p0 * (n - 3)) / n;
-			points[0][cages[0][outVertex].vert].color =
-n;
+			points[0][cages[0][outVertex].vert].xyz		= (Q + 2 * R + p0 * (n - 3)) / n;
+			points[0][cages[0][outVertex].vert].color	= n;
 		}
 
 		// Calculate Edge point
@@ -422,13 +465,6 @@ void Subdivide(
 	
 	int remaining = 1;
 	InterlockedAdd(args.Get().remaining, -1, remaining);
-	
-	SubdividePatch(
-		points[args.Get().input],
-		cages[args.Get().input],
-		args.Get().output,
-		beginCount, 
-		idx, vertexCount);
 	
 	GroupMemoryBarrierWithGroupSync();
 	

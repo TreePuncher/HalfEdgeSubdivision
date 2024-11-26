@@ -112,27 +112,45 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		ModifiableShape shape{};
 
 		const uint32_t face0[] = {
-			shape.AddVertex({   0.0f, -1.0f,   0.466667f }),
-			shape.AddVertex({  -1.0f, -1.0f,  -0.233333f }),
-			shape.AddVertex({  -1.0f,  0.0f,  -0.7f	 }),
-			shape.AddVertex({   0.0f,  0.0f,  -0.0f	 })
+			shape.AddVertex({   1.0f, -1.0f,   -1.0f }),
+			shape.AddVertex({  -1.0f, -1.0f,   -1.0f }),
+			shape.AddVertex({  -1.0f,  1.0f,   -1.0f }),
+			shape.AddVertex({   1.0f,  1.0f,   -1.0f })
 		};
+
 		const uint32_t face1[] = {
-			face0[0], face0[3],
-			shape.AddVertex({  1.0f,  0.0f, -0.7f }),
-			shape.AddVertex({  1.0f, -1.0f, -0.233333f })
+			face0[1],
+			shape.AddVertex({  -1.0f, -1.0f,   1.0f }),
+			shape.AddVertex({  -1.0f,  1.0f,   1.0f }),
+			face0[2],
 		};
 
 		const uint32_t face2[] = {
-			face0[3], 
+			face1[2], 
+			face1[1],
+			shape.AddVertex({  1.0f, -1.0f,   1.0f }),
+			shape.AddVertex({  1.0f,  1.0f,   1.0f  }),
+		};
+
+		const uint32_t face3[] = {
+			face2[3],
+			face2[2],
+			face0[0],
+			face0[3],
+		};
+
+		const uint32_t face4[] = {
+			face0[3],
 			face0[2],
-			shape.AddVertex({  0.0f, 0.0f, -1.25f }),
 			face1[2],
+			face2[3],
 		};
 
 		shape.AddPolygon(face0, face0 + 4);
 		shape.AddPolygon(face1, face1 + 4);
 		shape.AddPolygon(face2, face2 + 4);
+		shape.AddPolygon(face3, face3 + 4);
+		shape.AddPolygon(face4, face4 + 4);
 
 		HEMesh = std::make_unique<HalfEdgeMesh>(
 							shape,

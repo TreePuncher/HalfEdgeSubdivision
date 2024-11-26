@@ -58,10 +58,12 @@ namespace FlexKit
 		static constexpr PSOHandle FacePass			= PSOHandle{ GetTypeGUID(HEFacePass) };
 		static constexpr PSOHandle VertexUpdate		= PSOHandle{ GetTypeGUID(HEVertexUpdate) };
 		static constexpr PSOHandle RenderFaces		= PSOHandle{ GetTypeGUID(HERenderFaces) };
+		static constexpr PSOHandle RenderWireframe	= PSOHandle{ GetTypeGUID(RenderWireframe) };
 		
 		inline static GPUStateObject_ptr	updateState		= nullptr;
 		inline static RootSignature*		globalRoot		= nullptr;
-		inline static uint32_t				entryPointIdx	= -1;
+		inline static uint32_t				initiate		= -1;
+		inline static uint32_t				subdivide		= -1;
 		inline static ProgramIdentifier		programID;
 
 		uint32_t			controlCageSize		= 0;
