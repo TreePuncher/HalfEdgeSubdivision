@@ -116,14 +116,15 @@ uint32_t Prev(in TY_Cage cage, uint32_t idx)
 	return cage[idx].prev;
 }
 #if 1
+
 uint32_t Next(uint32_t idx)
 {
-	return inputCage[idx].next;
+	return (idx & (0xffffffff << 2)) | ((idx + 1) & 3);
 }
 
 uint32_t Prev(uint32_t idx)
 {
-	return inputCage[idx].prev;
+	return (idx & (0xffffffff << 2)) | ((idx - 1) & 3);
 }
 
 #else
@@ -152,6 +153,22 @@ uint32_t RotateSelectionCCW(in TY_cage cage, uint32_t halfEdge)
 	const uint32_t twin = cage[halfEdge].Twin();
 	return (twin == BORDERVALUE) ? BORDERVALUE : Next(cage, twin);
 }
+
+
+template<typename TY_cage>
+uint32_t RotateSelectionCW_TE(in TY_cage cage, uint32_t halfEdge)
+{
+	return (halfEdge != BORDERVALUE) ? cage[Prev(halfEdge)].Twin() : BORDERVALUE;
+}
+
+
+template<typename TY_cage>
+uint32_t RotateSelectionCCW_TE(in TY_cage cage, uint32_t halfEdge)
+{
+	const uint32_t twin = cage[halfEdge].Twin();
+	return (twin == BORDERVALUE) ? BORDERVALUE : Next(twin);
+}
+
 
 struct SubdivisionInit
 {
@@ -229,7 +246,7 @@ void InitiateSubdivision(
 	buildArgs.Get().remaining		= args.Get().patchCount;
 	buildArgs.Get().patchCount		= args.Get().patchCount;
 	buildArgs.Get().newPatches		= 0;
-	buildArgs.Get().dispatchSize	= uint3(1, 1, 1);
+	buildArgs.Get().dispatchSize	= uint3(args.Get().patchCount / 32 + (args.Get().patchCount % 32 == 0 ? 0 : 1), 1, 1);
 	
 	buildArgs.OutputComplete();
 }
@@ -290,13 +307,61 @@ void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, i
 }
 
 
+void SubdivideTwinEdges(RWStructuredBuffer<Vertex> inputPoints, RWStructuredBuffer<TwinEdge> inputCage, uint outputDest, in uint j, in uint idx)
+{
+	float3	facePoint		= float3(0, 0, 0);
+	const uint vertexCount	= 9;
+	
+	for (int32_t i = 0; i < 4; i++)
+	{
+		uint32_t edgeItr	 = 4 * j + i;
+		const uint outputIdx = edgeItr * 4;
+		
+		const TwinEdge te		= inputCage[edgeItr];
+		const TwinEdge prevEdge	= inputCage[Prev(edgeItr)];
+		
+		TwinEdge edge0;
+		edge0.twin = te.Border() ? BORDERVALUE : (Next(te.Twin()) * 4 + 3);
+		edge0.vert = idx + 2 * i + 0;
+		edge0.MarkCorner(te.IsCorner());
+		cages[outputDest][outputIdx + 0] = edge0;
+
+		TwinEdge edge1;
+		edge1.twin = (4 * j + (4 + i + 1) % 4) * 4 + 2;
+		edge1.twin = (edgeItr + (4 + i + 1) % 4) * 4 + 2;
+		edge1.vert = idx + 2 * i + 1;
+		cages[outputDest][outputIdx + 1] = edge1;
+		
+		TwinEdge edge2;
+		edge2.twin = (4 * j + (4 + i - 1) % 4) * 4 + 1;
+		edge2.vert = idx + 9 - 1;
+		cages[outputDest][outputIdx + 2] = edge2;
+		
+		TwinEdge edge3;
+		edge3.twin = prevEdge.Border() ? BORDERVALUE : (prevEdge.Twin() * 4);
+		edge3.vert = idx + (9 - 2 + 2 * i) % (vertexCount - 1);
+		edge3.MarkCorner(prevEdge.IsCorner());
+		cages[outputDest][outputIdx + 3] = edge3;
+
+		facePoint += inputPoints[te.vert].xyz;
+		
+		points[outputDest][idx + 2 * i + 0] = MakeVertex(inputPoints[te.vert].xyz, 6);
+		points[outputDest][idx + 2 * i + 1] = MakeVertex(
+												(inputPoints[te.vert].xyz + 
+												 inputPoints[inputCage[Next(edgeItr)].vert].xyz) / 2, 6);
+	}
+
+	points[outputDest][idx + 8] = MakeVertex(facePoint / 4.0f, 6);
+}
+
+
 [Shader("node")]
 [NodeLaunch("broadcasting")]
 [NumThreads(32, 1, 1)]
 [NodeMaxDispatchGrid(1024, 1, 1)]
 void BuildBisectorFaces(
 	RWDispatchNodeInputRecord<SubdivisionInit>		buildData,
-	[MaxRecords(1)] NodeOutput<CatmullClarkArgs>	CreateInitialEdgePoints,
+	[MaxRecords(1)] NodeOutput<CatmullClarkArgs>	ApplyCCToHalfEdges,
 	const uint threadID : SV_DispatchThreadID)
 {
 	if (threadID >= buildData.Get().patchCount)
@@ -317,7 +382,7 @@ void BuildBisectorFaces(
 	
 	GroupMemoryBarrierWithGroupSync();
 	
-	ThreadNodeOutputRecords<CatmullClarkArgs> subDivArgs = CreateInitialEdgePoints.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
+	ThreadNodeOutputRecords<CatmullClarkArgs> subDivArgs = ApplyCCToHalfEdges.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
 	if(remaining == 1)
 	{
 		subDivArgs.Get().remaining		= buildData.Get().patchCount;
@@ -332,24 +397,15 @@ void BuildBisectorFaces(
 	Barrier(cages[0], DEVICE_SCOPE);
 }
 
-[Shader("node")]
-[NodeLaunch("broadcasting")]
-[NodeDispatchGrid(1, 1, 1)]
-[NumThreads(32, 1, 1)]
-void CreateInitialVertexPoints(
-	RWDispatchNodeInputRecord<CatmullClarkArgs>	args)
-{
-}
-
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
 [NodeDispatchGrid(1, 1, 1)]
 [NumThreads(32, 1, 1)]
-void CreateInitialEdgePoints(
+void ApplyCCToHalfEdges(
 	const uint										threadID : SV_DispatchThreadID,
 	RWDispatchNodeInputRecord<CatmullClarkArgs>		args,
-	[MaxRecords(1)] NodeOutput<CatmullClarkArgs>	CreateInitialVertexPoints)
+	[MaxRecords(1)] NodeOutput<SubdivisionArgs>		SubdivideTwinEdgeTask)
 {
 	if (threadID >= args.Get().patchCount)
 		return;
@@ -439,8 +495,123 @@ void CreateInitialEdgePoints(
 		}
 	}
 
-	ThreadNodeOutputRecords <CatmullClarkArgs>catmullClarkPoints = CreateInitialVertexPoints.GetThreadNodeOutputRecords(0);
-	catmullClarkPoints.OutputComplete();
+	int remaining = 1;
+	InterlockedAdd(args.Get().remaining, -1, remaining);
+	
+	GroupMemoryBarrierWithGroupSync();
+	
+	ThreadNodeOutputRecords<SubdivisionArgs> subdivArgs = SubdivideTwinEdgeTask.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
+	if(remaining == 1)
+	{
+		subdivArgs.Get().remaining		= args.Get().patchCount * 4;
+		subdivArgs.Get().patchCount		= args.Get().patchCount * 4;
+		subdivArgs.Get().input			= 1;
+		subdivArgs.Get().output			= 2;
+		subdivArgs.Get().dispatchSize	= uint3(5, 1, 1);
+	}
+
+	Barrier(points[0], DEVICE_SCOPE);
+	Barrier(cages[0], DEVICE_SCOPE);
+
+	subdivArgs.OutputComplete();
+}
+
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NodeDispatchGrid(1, 1, 1)]
+[NumThreads(32, 1, 1)]
+void ApplyCCToTwinEdges(
+	const uint										threadID : SV_DispatchThreadID,
+	RWDispatchNodeInputRecord<CatmullClarkArgs>		args)
+{
+	if (threadID >= args.Get().patchCount)
+		return;
+	
+	const uint2 beginCount	= uint2(threadID * 4, 4);
+	uint32_t edgeItr		= beginCount.x;
+	TwinEdge he				= cages[0][edgeItr];
+
+	for (uint32_t i = 0; i < 4; edgeItr++, i++, he = cages[0][edgeItr])
+	{
+		const uint32_t	outEdge		= 1 + 4 * edgeItr;
+		const uint32_t	outVertex	= 0 + 4 * edgeItr;
+
+		if(!he.Border() && !he.IsCorner())
+		{
+			float3 p0	= inputPoints[inputCage[edgeItr].vert].xyz;
+			float3 Q	= points[1][cages[1][GetFaceVertexIdx(outVertex)].vert].xyz;
+			float3 R	= lerp(p0, inputPoints[inputCage[Next(inputCage, edgeItr)].vert].xyz, 0.5);
+			float  n	= 1.0f;
+
+			uint32_t selection	= RotateSelectionCCW_TE(inputCage, edgeItr);
+			while(selection != edgeItr)
+			{
+				n += 1.0f;
+				Q += points[1][cages[1][GetFaceVertexIdx(selection * 4)].vert].xyz;
+				R += lerp(p0, inputPoints[inputCage[Next(inputCage, selection)].vert].xyz, 0.5);
+				selection = RotateSelectionCCW_TE(inputCage, selection);
+			}
+
+			Q /= n;
+			R /= n;
+
+			points[1][cages[1][outVertex].vert].xyz		= (Q + 2 * R + p0 * (n - 3)) / n;
+			points[1][cages[1][outVertex].vert].color	= n;
+		}
+
+		// Calculate Edge point
+		if(!he.Border())
+		{
+			const uint32_t e0 = min(he.Twin(), edgeItr);
+			const uint32_t e1 = max(he.Twin(), edgeItr);
+			
+			const uint32_t f0 = GetFaceVertexIdx(4 * e0);
+			const uint32_t f1 = GetFaceVertexIdx(4 * e1);
+			
+			const float3 fv0 = points[1][cages[1][f0].vert].xyz;
+			const float3 fv1 = points[1][cages[1][f1].vert].xyz;
+			const float3 ev0 = points[1][cages[1][outEdge].vert].xyz;
+
+			points[1][cages[1][outEdge].vert].xyz	= (fv0 + fv1) / 4.0f + ev0 / 2.0f;
+		}
+		
+		if(he.IsCorner())
+		{	// Boundry Vertex
+			uint32_t n				= 2; 
+			uint32_t prevSelection	= edgeItr;
+			uint32_t selection		= RotateSelectionCCW_TE(inputCage, edgeItr);
+
+			while(selection != BORDERVALUE)
+			{
+				n++;
+				prevSelection	= selection;
+				selection		= RotateSelectionCCW_TE(inputCage, selection);
+				break;
+			}
+
+			const uint32_t selection0 = prevSelection;
+
+			prevSelection	= edgeItr;
+			selection		= RotateSelectionCW_TE(inputCage, edgeItr);
+			while(selection != BORDERVALUE)
+			{
+				n++;
+				prevSelection	= selection;
+				selection		= RotateSelectionCW_TE(cages[0], selection);
+			}
+			
+			const uint32_t selection1 = prevSelection;
+
+			if(n > 2)
+			{
+				const float3 p0 = inputPoints[inputCage[Next(selection0)].vert].xyz;
+				const float3 p1 = inputPoints[he.vert].xyz;
+				const float3 p2 = inputPoints[inputCage[Prev(selection1)].vert].xyz;	
+				points[0][cages[0][outVertex].vert].xyz	= (p0 + 6 * p1 + p2) / 8.0f;
+			}
+		}
+	}
 }
 
 [Shader("node")]
@@ -448,21 +619,19 @@ void CreateInitialEdgePoints(
 [NumThreads(32, 1, 1)]
 [NodeMaxRecursionDepth(4)]
 [NodeMaxDispatchGrid(1024, 1, 1)]
-void Subdivide(
+void SubdivideTwinEdgeTask(
 	RWDispatchNodeInputRecord<SubdivisionArgs>		args,
-	[MaxRecords(1)] NodeOutput<SubdivisionArgs>		Subdivide,
 	const uint										threadID : SV_DispatchThreadID)
 {
 	if (threadID >= args.Get().patchCount)
 		return;
 	
-	const uint2 beginCount = uint2(threadID * 4, 4);
-	const uint vertexCount = 1 + 2 * beginCount.y;
+	uint vertexBuffer;
+	InterlockedAdd(args.Get().newPatches, 4);
 	
-	uint idx;
-	InterlockedAdd(args.Get().vertexCounter, vertexCount, idx);
-	InterlockedAdd(args.Get().newPatches, beginCount.y);
+	SubdivideTwinEdges(points[0], cages[0], 1, threadID, threadID * 9);
 	
+	/*
 	int remaining = 1;
 	InterlockedAdd(args.Get().remaining, -1, remaining);
 	
@@ -487,4 +656,5 @@ void Subdivide(
 	
 	Barrier(points[1], DEVICE_SCOPE);
 	Barrier(cages[1], DEVICE_SCOPE);
+	*/
 }

@@ -147,10 +147,10 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		};
 
 		shape.AddPolygon(face0, face0 + 4);
-		shape.AddPolygon(face1, face1 + 4);
-		shape.AddPolygon(face2, face2 + 4);
-		shape.AddPolygon(face3, face3 + 4);
-		shape.AddPolygon(face4, face4 + 4);
+		//shape.AddPolygon(face1, face1 + 4);
+		//shape.AddPolygon(face2, face2 + 4);
+		//shape.AddPolygon(face3, face3 + 4);
+		//shape.AddPolygon(face4, face4 + 4);
 
 		HEMesh = std::make_unique<HalfEdgeMesh>(
 							shape,
@@ -281,7 +281,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			transformUpdate.AddInput(QueueOrbitCameraUpdateTask(dispatcher, *orbitCamera, renderWindow->mouseState, dT));
 
 		if(HEMesh && activeCamera != FlexKit::InvalidHandle)
-			HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer(), depthBuffer.Get());
+			HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer(), depthBuffer.Get(), 1);
 
 		PresentBackBuffer(frameGraph, renderWindow->GetBackBuffer());
 
