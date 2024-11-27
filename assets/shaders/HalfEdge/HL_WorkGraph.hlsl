@@ -1,6 +1,10 @@
 #define BORDERVALUE (0xffffffff >> 1)
 #define TWINMASK (0xffffffff >> 1)
 
+
+/************************************************************************************************/
+
+
 struct HalfEdge
 {
 	 int32_t twin;
@@ -29,6 +33,10 @@ struct HalfEdge
 	}
 };
 
+
+/************************************************************************************************/
+
+
 struct TwinEdge
 {
 	 int32_t twin;
@@ -56,12 +64,19 @@ struct TwinEdge
 };
 
 
+/************************************************************************************************/
+
+
 struct Vertex
 {
 	float3	xyz;
 	uint	color;
 	float2  UV;
 };
+
+
+/************************************************************************************************/
+
 
 Vertex MakeVertex(float3 xyz, uint color = 0, float2 UV = float2(0, 0))
 {
@@ -73,6 +88,10 @@ Vertex MakeVertex(float3 xyz, uint color = 0, float2 UV = float2(0, 0))
 	return v;
 }
 
+
+/************************************************************************************************/
+
+
 StructuredBuffer<HalfEdge>	inputCage	: register(t0);
 StructuredBuffer<Vertex>	inputPoints : register(t1);
 StructuredBuffer<uint2>		inputFaces	: register(t2);
@@ -81,10 +100,16 @@ globallycoherent RWStructuredBuffer<TwinEdge>	cages[]		: register(u0, space1);
 globallycoherent RWStructuredBuffer<Vertex>		points[]	: register(u0, space2);
 
 
+/************************************************************************************************/
+
+
 uint32_t GetFaceVertexIdx(uint32_t halfEdge)
 {
 	return (halfEdge & (~0x3)) | 2;
 }
+
+
+/************************************************************************************************/
 
 
 template<typename TY_cage, typename TY_points>
@@ -96,6 +121,9 @@ uint32_t GetTwinFaceVertexIdx(in TY_cage cage, uint32_t halfEdge)
 }
 
 
+/************************************************************************************************/
+
+
 template<typename TY_cage, typename TY_points>
 Vertex GetTwinFaceVertex(in TY_cage cage, in TY_points points, uint32_t halfEdge)
 {
@@ -104,40 +132,40 @@ Vertex GetTwinFaceVertex(in TY_cage cage, in TY_points points, uint32_t halfEdge
 	return points[cage[faceEdge].vert];
 }
 
+
+/************************************************************************************************/
+
+
 template<typename TY_Cage>
 uint32_t Next(in TY_Cage cage, uint32_t idx)
 {
 	return cage[idx].next;
 }
 
+
 template<typename TY_Cage>
 uint32_t Prev(in TY_Cage cage, uint32_t idx)
 {
 	return cage[idx].prev;
 }
-#if 1
+
+
+/************************************************************************************************/
+
 
 uint32_t Next(uint32_t idx)
 {
 	return (idx & (0xffffffff << 2)) | ((idx + 1) & 3);
 }
 
+
 uint32_t Prev(uint32_t idx)
 {
 	return (idx & (0xffffffff << 2)) | ((idx - 1) & 3);
 }
 
-#else
-uint32_t Next(uint32_t idx)
-{
-	return (idx & 0xffffffff << 2) | (idx + 1) & 0x3;
-}
 
-uint32_t Prev(uint32_t idx)
-{
-	return (idx & 0xffffffff << 2) | (idx - 1) & 0x3;
-}
-#endif
+/************************************************************************************************/
 
 
 template<typename TY_cage>
@@ -168,6 +196,9 @@ uint32_t RotateSelectionCCW_TE(in TY_cage cage, uint32_t halfEdge)
 	const uint32_t twin = cage[halfEdge].Twin();
 	return (twin == BORDERVALUE) ? BORDERVALUE : Next(twin);
 }
+
+
+/************************************************************************************************/
 
 
 struct SubdivisionInit
@@ -205,6 +236,10 @@ struct LaunchParams
 	uint  patchCount;
 };
 
+
+/************************************************************************************************/
+
+
 [Shader("node")]
 [NodeLaunch("broadcasting")]
 [NodeDispatchGrid(1, 1, 1)]
@@ -223,6 +258,10 @@ void InitiateBuild(
 	
 	buildArgs.OutputComplete();
 }
+
+
+/************************************************************************************************/
+
 
 struct LaunchSubdivisionParams
 {
@@ -250,6 +289,9 @@ void InitiateSubdivision(
 	
 	buildArgs.OutputComplete();
 }
+
+
+/************************************************************************************************/
 
 
 template<typename TY_points, typename TY_cage>
@@ -286,7 +328,6 @@ void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, i
 		TwinEdge edge3;
 		edge3.twin = prevEdge.Border() ? BORDERVALUE : (prevEdge.Twin() * 4);
 		edge3.vert = idx + (vertexCount - 2 + 2 * i) % (vertexCount - 1);
-		edge3.MarkCorner(prevEdge.IsCorner());
 		cages[outputDest][outputIdx + 3] = edge3;
 
 		facePoint += inputPoints[he.vert].xyz;
@@ -305,6 +346,9 @@ void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, i
 
 	points[outputDest][idx + vertexCount - 1] = MakeVertex(facePoint / beginCount.y, 6);
 }
+
+
+/************************************************************************************************/
 
 
 void SubdivideTwinEdges(RWStructuredBuffer<Vertex> inputPoints, RWStructuredBuffer<TwinEdge> inputCage, uint outputDest, in uint j, in uint idx)
@@ -327,20 +371,18 @@ void SubdivideTwinEdges(RWStructuredBuffer<Vertex> inputPoints, RWStructuredBuff
 		cages[outputDest][outputIdx + 0] = edge0;
 
 		TwinEdge edge1;
-		edge1.twin = (4 * j + (4 + i + 1) % 4) * 4 + 2;
-		edge1.twin = (edgeItr + (4 + i + 1) % 4) * 4 + 2;
+		edge1.twin = Next(edgeItr) * 4 + 2;
 		edge1.vert = idx + 2 * i + 1;
 		cages[outputDest][outputIdx + 1] = edge1;
 		
 		TwinEdge edge2;
-		edge2.twin = (4 * j + (4 + i - 1) % 4) * 4 + 1;
+		edge2.twin = Prev(edgeItr) * 4 + 1;
 		edge2.vert = idx + 9 - 1;
 		cages[outputDest][outputIdx + 2] = edge2;
 		
 		TwinEdge edge3;
 		edge3.twin = prevEdge.Border() ? BORDERVALUE : (prevEdge.Twin() * 4);
 		edge3.vert = idx + (9 - 2 + 2 * i) % (vertexCount - 1);
-		edge3.MarkCorner(prevEdge.IsCorner());
 		cages[outputDest][outputIdx + 3] = edge3;
 
 		facePoint += inputPoints[te.vert].xyz;
@@ -353,6 +395,9 @@ void SubdivideTwinEdges(RWStructuredBuffer<Vertex> inputPoints, RWStructuredBuff
 
 	points[outputDest][idx + 8] = MakeVertex(facePoint / 4.0f, 6);
 }
+
+
+/************************************************************************************************/
 
 
 [Shader("node")]
@@ -398,6 +443,9 @@ void BuildBisectorFaces(
 }
 
 
+/************************************************************************************************/
+
+
 [Shader("node")]
 [NodeLaunch("broadcasting")]
 [NodeDispatchGrid(1, 1, 1)]
@@ -405,7 +453,7 @@ void BuildBisectorFaces(
 void ApplyCCToHalfEdges(
 	const uint										threadID : SV_DispatchThreadID,
 	RWDispatchNodeInputRecord<CatmullClarkArgs>		args,
-	[MaxRecords(1)] NodeOutput<SubdivisionArgs>		SubdivideTwinEdgeTask)
+	[MaxRecords(1)] NodeOutput<SubdivisionArgs>		SubdivideTwinEdgeTask0)
 {
 	if (threadID >= args.Get().patchCount)
 		return;
@@ -413,19 +461,19 @@ void ApplyCCToHalfEdges(
 	const uint2 beginCount	= inputFaces[threadID];
 	uint32_t edgeItr		= beginCount.x;
 	HalfEdge he				= inputCage[edgeItr];
-
 	for (uint32_t i = 0; i < beginCount.y; edgeItr = he.next, i++, he = inputCage[edgeItr])
 	{
 		const uint32_t	outEdge		= 1 + 4 * edgeItr;
 		const uint32_t	outVertex	= 0 + 4 * edgeItr;
-
-		if(!he.Border() && !he.IsCorner())
+		HalfEdge		he_prev		= inputCage[he.prev];
+				
+		if(!he.Border() && !he.IsCorner() && !he_prev.Border())
 		{
 			float3 p0	= inputPoints[inputCage[edgeItr].vert].xyz;
 			float3 Q	= points[0][cages[0][GetFaceVertexIdx(outVertex)].vert].xyz;
 			float3 R	= lerp(p0, inputPoints[inputCage[Next(inputCage, edgeItr)].vert].xyz, 0.5);
 			float  n	= 1.0f;
-
+			
 			uint32_t selection	= RotateSelectionCCW(inputCage, edgeItr);
 			while(selection != edgeItr)
 			{
@@ -434,14 +482,12 @@ void ApplyCCToHalfEdges(
 				R += lerp(p0, inputPoints[inputCage[Next(inputCage, selection)].vert].xyz, 0.5);
 				selection = RotateSelectionCCW(inputCage, selection);
 			}
-
+			
 			Q /= n;
 			R /= n;
 
 			points[0][cages[0][outVertex].vert].xyz		= (Q + 2 * R + p0 * (n - 3)) / n;
-			points[0][cages[0][outVertex].vert].color	= n;
 		}
-
 		// Calculate Edge point
 		if(!he.Border())
 		{
@@ -457,40 +503,44 @@ void ApplyCCToHalfEdges(
 
 			points[0][cages[0][outEdge].vert].xyz	= (fv0 + fv1) / 4.0f + ev0 / 2.0f;
 		}
-		
-		if(he.IsCorner())
-		{	// Boundry Vertex
-			uint32_t n				= 2; 
-			uint32_t prevSelection	= edgeItr;
-			uint32_t selection		= RotateSelectionCCW(inputCage, edgeItr);
 
-			while(selection != BORDERVALUE)
-			{
-				n++;
-				prevSelection = selection;
-				selection = RotateSelectionCCW(inputCage, selection);
-				break;
-			}
-
-			const uint32_t selection0 = prevSelection;
-
-			prevSelection	= edgeItr;
-			selection		= RotateSelectionCW(inputCage, edgeItr);
-			while(selection != BORDERVALUE)
-			{
-				n++;
-				prevSelection	= selection;
-				selection		= RotateSelectionCW(inputCage, selection);
-			}
+		uint teIndex = outVertex;
+		for(int j = 0; j < 4; j++, teIndex += 3)
+		{
+			TwinEdge te = cages[0][teIndex];
 			
-			const uint32_t selection1 = prevSelection;
+			if(te.Border() && !te.IsCorner() && !he.IsCorner())
+			{	// Boundry Vertex
+				uint32_t n				= 2; 
+				uint32_t prevSelection	= edgeItr;
+				uint32_t selection		= RotateSelectionCCW(inputCage, edgeItr);
 
-			if(n > 2)
-			{
+				while(selection != BORDERVALUE)
+				{
+					n++;
+					prevSelection = selection;
+					selection = RotateSelectionCCW(inputCage, selection);
+					break;
+				}
+
+				const uint32_t selection0 = prevSelection;
+
+				prevSelection	= edgeItr;
+				selection		= RotateSelectionCW(inputCage, edgeItr);
+				while(selection != BORDERVALUE)
+				{
+					n++;
+					prevSelection	= selection;
+					selection		= RotateSelectionCW(inputCage, selection);
+				}
+			
+				const uint32_t selection1 = prevSelection;
+
 				const float3 p0 = inputPoints[inputCage[Next(inputCage, selection0)].vert].xyz;
 				const float3 p1 = inputPoints[he.vert].xyz;
 				const float3 p2 = inputPoints[inputCage[Prev(inputCage, selection1)].vert].xyz;	
-				points[0][cages[0][outVertex].vert].xyz	= (p0 + 6 * p1 + p2) / 8.0f;
+				points[0][cages[0][outVertex].vert].xyz		= (p0 + 6 * p1 + p2) / 8.0f;
+				break;
 			}
 		}
 	}
@@ -500,7 +550,7 @@ void ApplyCCToHalfEdges(
 	
 	GroupMemoryBarrierWithGroupSync();
 	
-	ThreadNodeOutputRecords<SubdivisionArgs> subdivArgs = SubdivideTwinEdgeTask.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
+	ThreadNodeOutputRecords<SubdivisionArgs> subdivArgs = SubdivideTwinEdgeTask0.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
 	if(remaining == 1)
 	{
 		subdivArgs.Get().remaining		= args.Get().patchCount * 4;
@@ -517,51 +567,51 @@ void ApplyCCToHalfEdges(
 }
 
 
-[Shader("node")]
-[NodeLaunch("broadcasting")]
-[NodeDispatchGrid(1, 1, 1)]
-[NumThreads(32, 1, 1)]
-void ApplyCCToTwinEdges(
-	const uint										threadID : SV_DispatchThreadID,
-	RWDispatchNodeInputRecord<CatmullClarkArgs>		args)
+/************************************************************************************************/
+
+
+void ApplyCCToTwinEdges(const uint threadID, in CatmullClarkArgs args)
 {
-	if (threadID >= args.Get().patchCount)
+	if (threadID >= args.patchCount)
 		return;
-	
-	const uint2 beginCount	= uint2(threadID * 4, 4);
-	uint32_t edgeItr		= beginCount.x;
-	TwinEdge he				= cages[0][edgeItr];
 
-	for (uint32_t i = 0; i < 4; edgeItr++, i++, he = cages[0][edgeItr])
+	const uint source = args.source;	
+	const uint target = args.target;	
+
+	uint32_t edgeItr = threadID * 4;
+	for (uint32_t i = 0; i < 4; edgeItr++, i++)
 	{
-		const uint32_t	outEdge		= 1 + 4 * edgeItr;
-		const uint32_t	outVertex	= 0 + 4 * edgeItr;
-
+		const TwinEdge he			= cages[source][edgeItr];
+		const uint32_t outEdge		= 1 + 4 * edgeItr;
+		const uint32_t outVertex	= 0 + 4 * edgeItr;
+		
 		if(!he.Border() && !he.IsCorner())
 		{
-			float3 p0	= inputPoints[inputCage[edgeItr].vert].xyz;
-			float3 Q	= points[1][cages[1][GetFaceVertexIdx(outVertex)].vert].xyz;
-			float3 R	= lerp(p0, inputPoints[inputCage[Next(inputCage, edgeItr)].vert].xyz, 0.5);
+			float3 p0	= points[source][cages[source][edgeItr].vert].xyz;
+			float3 Q	= points[target][cages[target][GetFaceVertexIdx(outVertex)].vert].xyz;
+			float3 R	= lerp(p0, points[source][cages[source][Next(edgeItr)].vert].xyz, 0.5);
 			float  n	= 1.0f;
 
-			uint32_t selection	= RotateSelectionCCW_TE(inputCage, edgeItr);
-			while(selection != edgeItr)
+			uint32_t selection	= RotateSelectionCCW_TE(cages[source], edgeItr);
+			while(selection != edgeItr && selection != BORDERVALUE)
 			{
 				n += 1.0f;
-				Q += points[1][cages[1][GetFaceVertexIdx(selection * 4)].vert].xyz;
-				R += lerp(p0, inputPoints[inputCage[Next(inputCage, selection)].vert].xyz, 0.5);
-				selection = RotateSelectionCCW_TE(inputCage, selection);
+				Q += points[target][cages[target][GetFaceVertexIdx(selection * 4)].vert].xyz;
+				R += lerp(p0, points[source][cages[source][Next(selection)].vert].xyz, 0.5);
+				selection = RotateSelectionCCW_TE(cages[source], selection);
 			}
-
-			Q /= n;
-			R /= n;
-
-			points[1][cages[1][outVertex].vert].xyz		= (Q + 2 * R + p0 * (n - 3)) / n;
-			points[1][cages[1][outVertex].vert].color	= n;
+			if(selection != BORDERVALUE)
+			{
+				Q /= n;
+				R /= n;
+			
+				points[target][cages[target][outVertex].vert].xyz = Q;
+				points[target][cages[target][outVertex].vert].xyz = (Q + 2 * R + p0 * (n - 3)) / n;
+			}
 		}
 
 		// Calculate Edge point
-		if(!he.Border())
+		if(!he.Border() && !he.IsCorner())
 		{
 			const uint32_t e0 = min(he.Twin(), edgeItr);
 			const uint32_t e1 = max(he.Twin(), edgeItr);
@@ -569,92 +619,231 @@ void ApplyCCToTwinEdges(
 			const uint32_t f0 = GetFaceVertexIdx(4 * e0);
 			const uint32_t f1 = GetFaceVertexIdx(4 * e1);
 			
-			const float3 fv0 = points[1][cages[1][f0].vert].xyz;
-			const float3 fv1 = points[1][cages[1][f1].vert].xyz;
-			const float3 ev0 = points[1][cages[1][outEdge].vert].xyz;
-
-			points[1][cages[1][outEdge].vert].xyz	= (fv0 + fv1) / 4.0f + ev0 / 2.0f;
-		}
-		
-		if(he.IsCorner())
-		{	// Boundry Vertex
-			uint32_t n				= 2; 
-			uint32_t prevSelection	= edgeItr;
-			uint32_t selection		= RotateSelectionCCW_TE(inputCage, edgeItr);
-
-			while(selection != BORDERVALUE)
-			{
-				n++;
-				prevSelection	= selection;
-				selection		= RotateSelectionCCW_TE(inputCage, selection);
-				break;
-			}
-
-			const uint32_t selection0 = prevSelection;
-
-			prevSelection	= edgeItr;
-			selection		= RotateSelectionCW_TE(inputCage, edgeItr);
-			while(selection != BORDERVALUE)
-			{
-				n++;
-				prevSelection	= selection;
-				selection		= RotateSelectionCW_TE(cages[0], selection);
-			}
+			const float3 fv0 = points[target][cages[target][f0].vert].xyz;
+			const float3 fv1 = points[target][cages[target][f1].vert].xyz;
+			const float3 ev0 = points[target][cages[target][outEdge].vert].xyz;
 			
-			const uint32_t selection1 = prevSelection;
+			points[target][cages[target][outEdge].vert].xyz	= (fv0 + fv1) / 4.0f + ev0 / 2.0f;
+		}
 
-			if(n > 2)
+		if(!he.IsCorner())
+		{	// Boundry Vertex
+			uint teIndex = outVertex;
+			for(int j = 0; j < 4; j++, teIndex += 3)
 			{
-				const float3 p0 = inputPoints[inputCage[Next(selection0)].vert].xyz;
-				const float3 p1 = inputPoints[he.vert].xyz;
-				const float3 p2 = inputPoints[inputCage[Prev(selection1)].vert].xyz;	
-				points[0][cages[0][outVertex].vert].xyz	= (p0 + 6 * p1 + p2) / 8.0f;
+				TwinEdge te2 = cages[target][teIndex];
+				
+				if(te2.Border() && !te2.IsCorner() && !he.IsCorner())
+				{
+					uint32_t n				= 2; 
+					uint32_t prevSelection	= edgeItr;
+					uint32_t selection		= RotateSelectionCCW_TE(cages[source], edgeItr);
+					
+					while(selection != BORDERVALUE)
+					{
+						n++;
+						prevSelection	= selection;
+						selection		= RotateSelectionCCW_TE(cages[source], selection);
+						break;
+					}
+					
+					const uint32_t selection0 = prevSelection;
+					
+					prevSelection	= edgeItr;
+					selection		= RotateSelectionCW_TE(cages[source], edgeItr);
+					while(selection != BORDERVALUE)
+					{
+						n++;
+						prevSelection	= selection;
+						selection		= RotateSelectionCW_TE(cages[source], selection);
+					}
+					
+					const uint32_t selection1 = prevSelection;
+					
+					const float3 p0 = points[source][cages[source][Next(selection0)].vert].xyz;
+					const float3 p1 = points[source][he.vert].xyz;
+					const float3 p2 = points[source][cages[source][Prev(selection1)].vert].xyz;	
+					
+					const float3 newPoint = (p0 + 6 * p1 + p2) / 8.0f;
+					points[target][cages[target][outVertex].vert].xyz	= newPoint;
+					break;
+				}
 			}
 		}
 	}
 }
 
+
+/************************************************************************************************/
+
+
 [Shader("node")]
 [NodeLaunch("broadcasting")]
 [NumThreads(32, 1, 1)]
-[NodeMaxRecursionDepth(4)]
 [NodeMaxDispatchGrid(1024, 1, 1)]
-void SubdivideTwinEdgeTask(
+void SubdivideTwinEdgeTask0(
 	RWDispatchNodeInputRecord<SubdivisionArgs>		args,
+	[MaxRecords(1)] NodeOutput<CatmullClarkArgs>	ApplyCCToTwinEdges0,
+	const uint										threadID : SV_DispatchThreadID)
+{
+	if (threadID >= args.Get().patchCount)
+		return;
+	
+	SubdivideTwinEdges(points[0], cages[0], 1, threadID, threadID * 9);
+	
+	int remaining = 1;
+	InterlockedAdd(args.Get().remaining, -1, remaining);
+	
+	GroupMemoryBarrierWithGroupSync();
+	
+	Barrier(points[1], DEVICE_SCOPE);
+	Barrier(cages[1], DEVICE_SCOPE);
+
+	ThreadNodeOutputRecords<CatmullClarkArgs> subDivArgs = ApplyCCToTwinEdges0.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
+	if (remaining == 1)
+	{
+		subDivArgs.Get().source			= 0;
+		subDivArgs.Get().target			= 1;
+		subDivArgs.Get().remaining		= args.Get().patchCount;
+		subDivArgs.Get().patchCount		= args.Get().patchCount;
+		subDivArgs.Get().dispatchSize	= uint3(args.Get().patchCount / 32 + (args.Get().patchCount % 32 == 0 ? 0 : 1), 1, 1);
+	}
+
+	subDivArgs.OutputComplete();
+}
+
+
+/************************************************************************************************/
+
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NumThreads(32, 1, 1)]
+[NodeMaxDispatchGrid(1024, 1, 1)]
+void SubdivideTwinEdgeTask1(
+	RWDispatchNodeInputRecord<SubdivisionArgs>		args,
+	[MaxRecords(1)] NodeOutput<CatmullClarkArgs>	ApplyCCToTwinEdges1,
 	const uint										threadID : SV_DispatchThreadID)
 {
 	if (threadID >= args.Get().patchCount)
 		return;
 	
 	uint vertexBuffer;
-	InterlockedAdd(args.Get().newPatches, 4);
+	SubdivideTwinEdges(points[1], cages[1], 2, threadID, threadID * 9);
 	
-	SubdivideTwinEdges(points[0], cages[0], 1, threadID, threadID * 9);
-	
-	/*
 	int remaining = 1;
 	InterlockedAdd(args.Get().remaining, -1, remaining);
 	
 	GroupMemoryBarrierWithGroupSync();
 	
-	if(args.Get().output == 2)
-		return;
-	
-	ThreadNodeOutputRecords < SubdivisionArgs > subDivArgs = Subdivide.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
-	if (remaining == 1)
-	{
-		subDivArgs.Get().vertexCounter	= 0;
-		subDivArgs.Get().remaining		= args.Get().newPatches;
-		subDivArgs.Get().remaining		= args.Get().newPatches;
-		subDivArgs.Get().patchCount		= args.Get().patchCount * 4;
-		subDivArgs.Get().newPatches		= 0;
-		subDivArgs.Get().input			= args.Get().output;
-		subDivArgs.Get().output			= args.Get().output + 1;
-		subDivArgs.Get().dispatchSize	= uint3(args.Get().patchCount * 4 / 32 + (args.Get().patchCount * 4 % 32 == 0 ? 0 : 1), 1, 1);
-	}
-	subDivArgs.OutputComplete();
-	
 	Barrier(points[1], DEVICE_SCOPE);
 	Barrier(cages[1], DEVICE_SCOPE);
-	*/
+	
+	ThreadNodeOutputRecords<CatmullClarkArgs> subDivArgs = ApplyCCToTwinEdges1.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
+	if (remaining == 1)
+	{
+		subDivArgs.Get().source			= 1;
+		subDivArgs.Get().target			= 2;
+		subDivArgs.Get().remaining		= args.Get().patchCount;
+		subDivArgs.Get().patchCount		= args.Get().patchCount;
+		subDivArgs.Get().dispatchSize	= uint3((args.Get().patchCount) / 32 + ((args.Get().patchCount) % 32 == 0 ? 0 : 1), 1, 1);
+	}
+	
+	subDivArgs.OutputComplete();
 }
+
+
+/************************************************************************************************/
+
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NumThreads(32, 1, 1)]
+[NodeMaxDispatchGrid(1024, 1, 1)]
+void ApplyCCToTwinEdges0(
+	const uint										threadID : SV_DispatchThreadID,
+	RWDispatchNodeInputRecord<CatmullClarkArgs>		args, 
+	[MaxRecords(1)] NodeOutput<SubdivisionArgs>		SubdivideTwinEdgeTask1)
+{
+	ApplyCCToTwinEdges(threadID, args.Get());
+
+	int remaining = 1;
+	InterlockedAdd(args.Get().remaining, -1, remaining);
+	
+	GroupMemoryBarrierWithGroupSync();
+	
+	ThreadNodeOutputRecords<SubdivisionArgs> subdivArgs = SubdivideTwinEdgeTask1.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
+	if(remaining == 1)
+	{
+		subdivArgs.Get().remaining		= args.Get().patchCount * 4;
+		subdivArgs.Get().patchCount		= args.Get().patchCount * 4;
+		subdivArgs.Get().input			= 1;
+		subdivArgs.Get().output			= 2;
+		subdivArgs.Get().dispatchSize	= uint3(7, 1, 1);
+	}
+
+	Barrier(points[0], DEVICE_SCOPE);
+	Barrier(cages[0], DEVICE_SCOPE);
+
+	subdivArgs.OutputComplete();
+}
+
+
+/************************************************************************************************/
+
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NumThreads(32, 1, 1)]
+[NodeMaxDispatchGrid(1024, 1, 1)]
+void ApplyCCToTwinEdges1(
+	const uint									threadID : SV_DispatchThreadID,
+	RWDispatchNodeInputRecord<CatmullClarkArgs>	args)
+{
+	ApplyCCToTwinEdges(threadID, args.Get());
+
+	//int remaining = 1;
+	//InterlockedAdd(args.Get().remaining, -1, remaining);
+	//
+	//GroupMemoryBarrierWithGroupSync();
+	//
+	//ThreadNodeOutputRecords<SubdivisionArgs> subdivArgs = SubdivideTwinEdgeTask1.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
+	//if(remaining == 1)
+	//{
+	//	subdivArgs.Get().remaining		= args.Get().patchCount * 4;
+	//	subdivArgs.Get().patchCount		= args.Get().patchCount * 4;
+	//	subdivArgs.Get().input			= 1;
+	//	subdivArgs.Get().output			= 2;
+	//	subdivArgs.Get().dispatchSize	= uint3(7, 1, 1);
+	//}
+	//
+	//Barrier(points[0], DEVICE_SCOPE);
+	//Barrier(cages[0], DEVICE_SCOPE);
+	//
+	//subdivArgs.OutputComplete();
+}
+
+
+/**********************************************************************
+
+Copyright (c) 2024 Robert May
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**********************************************************************/

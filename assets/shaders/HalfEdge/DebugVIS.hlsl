@@ -75,13 +75,13 @@ VertexOut MakeVert(in Vertex v, uint patchID)
 	VertexOut VOut;
 	VOut.v			= mul(PV, float4(v.xyz, 1));
 	VOut.patchID	= patchID;
-	VOut.color		= float4(colors[patchID% 7], 1);
+	VOut.color		= float4(colors[patchID % 7], 1);
 	
 	return VOut;
 }
 
 
-Vertex2Out MakeWireframeVert(float4 xyzw, float3 d, uint patchID)
+Vertex2Out MakeWireframeVert(float4 xyzw, float3 d, uint color, uint patchID)
 {
 	static float3 colors[] =
 	{
@@ -91,14 +91,14 @@ Vertex2Out MakeWireframeVert(float4 xyzw, float3 d, uint patchID)
 		float3(1, 0, 1),  // 3
 		float3(1, 1, 1),  // 4
 		float3(0, 1, 1),
-		float3(0.75f, 0.75f, 0.75f),
+		float3(0.25f, 0.25f, 0.25f),
 	};
 
 	
 	Vertex2Out VOut;
 	VOut.v			= xyzw;
 	VOut.patchID	= patchID;
-	VOut.color		= float4(colors[patchID % 4], 1);
+	VOut.color		= float4(colors[color % 7], 1);
 	VOut.d			= d;
 	return VOut;
 }
@@ -180,13 +180,13 @@ void WireMain(
 	CreateWireframeArgs(v0, v1, v2, d0);
 	CreateWireframeArgs(v0, v2, v3, d1);
 	
-	verts[6 * (threadID % 32) + 0] = MakeWireframeVert(v0, float3(d0[0], 0, 0), threadID);
-	verts[6 * (threadID % 32) + 1] = MakeWireframeVert(v1, float3(0, d0[1], 0), threadID);
-	verts[6 * (threadID % 32) + 2] = MakeWireframeVert(v2, float3(0, 0, d0[2]), threadID);
+	verts[6 * (threadID % 32) + 0] = MakeWireframeVert(v0, float3(d0[0], 0, 0), inputVerts[he0.vert].color, threadID);
+	verts[6 * (threadID % 32) + 1] = MakeWireframeVert(v1, float3(0, d0[1], 0), inputVerts[he1.vert].color, threadID);
+	verts[6 * (threadID % 32) + 2] = MakeWireframeVert(v2, float3(0, 0, d0[2]), inputVerts[he2.vert].color, threadID);
 	
-	verts[6 * (threadID % 32) + 3] = MakeWireframeVert(v0, float3(d1[0], 0, 0), threadID);
-	verts[6 * (threadID % 32) + 4] = MakeWireframeVert(v2, float3(0, d1[1], 0), threadID);
-	verts[6 * (threadID % 32) + 5] = MakeWireframeVert(v3, float3(0, 0, d1[2]), threadID);
+	verts[6 * (threadID % 32) + 3] = MakeWireframeVert(v0, float3(d1[0], 0, 0), inputVerts[he0.vert].color, threadID);
+	verts[6 * (threadID % 32) + 4] = MakeWireframeVert(v2, float3(0, d1[1], 0), inputVerts[he2.vert].color, threadID);
+	verts[6 * (threadID % 32) + 5] = MakeWireframeVert(v3, float3(0, 0, d1[2]), inputVerts[he3.vert].color, threadID);
 		
 	tris[2 * (threadID % 32) + 0] = uint3(6 * (threadID % 32) + 0, 6 * (threadID % 32) + 1, 6 * (threadID % 32) + 2);
 	tris[2 * (threadID % 32) + 1] = uint3(6 * (threadID % 32) + 3, 6 * (threadID % 32) + 4, 6 * (threadID % 32) + 5);	

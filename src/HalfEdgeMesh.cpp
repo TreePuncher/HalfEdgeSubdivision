@@ -20,10 +20,10 @@ namespace FlexKit
 		for (const auto&& [idx, edge] : std::views::enumerate(shape.wEdges))
 		{
 			auto t = shape.IsEdgeVertex(edge.vertices[0]);
-			
+			bool c = shape.GetVertexValence(edge.vertices[0]) == 2;
 			HEEdge hEdge
 			{
-				.twin = shape.IsEdgeVertex(edge.vertices[0]) ? (edge.twin & (0xffffffff >> 1)) | (1 << 31) : (edge.twin & (0xffffffff >> 1)),
+				.twin = shape.GetVertexValence(edge.vertices[0]) == 2 ? ((edge.twin & (0xffffffff >> 1)) | (1 << 31)) : (edge.twin & (0xffffffff >> 1)),
 				.next = edge.next,
 				.prev = edge.prev,
 				.vert = edge.vertices[0],
@@ -453,7 +453,7 @@ namespace FlexKit
 			[this, camera, targetLevel](DrawLevel& visData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
 				ctx.BeginEvent_DEBUG("Draw HE Mesh");
-
+				
 				RenderTargetList renderTargets = { resources.RenderTarget(visData.renderTarget, ctx) };
 				ctx.SetGraphicsPipelineState(RenderWireframe, threadLocalAllocator);
 				ctx.SetGraphicsShaderResourceView(0, resources.NonPixelShaderResource(visData.inputCage, ctx, Sync_Compute, Sync_Compute));
@@ -470,7 +470,7 @@ namespace FlexKit
 				ctx.SetGraphicsConstantValue(2, 17, &constants);
 				ctx.SetScissorAndViewports(renderTargets);
 				ctx.SetRenderTargets(renderTargets, true, resources.GetResource(visData.depthTarget));
-				ctx.DispatchMesh({ 5, 1, 1 });
+				ctx.DispatchMesh({ patchCount[targetLevel] / 32 + (patchCount[targetLevel] % 32 == 0 ? 0 : 1), 1, 1 });
 
 				ctx.EndEvent_DEBUG();
 			});
