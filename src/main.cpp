@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <ModifiableShape.hpp>
 #include <MemoryUtilities.hpp>
+#include <MeshUtilities.hpp>
 #include <print>
 #include <ranges>
 #include <Transforms.hpp>
@@ -69,6 +70,86 @@ struct AtomicVector
 /************************************************************************************************/
 
 
+
+FlexKit::ModifiableShape LoadObjIntoShape(std::filesystem::path p)
+{
+	using namespace FlexKit;
+
+	FlexKit::ModifiableShape shape;
+
+	Vector<char> buffer{ SystemAllocator };
+	buffer.resize(std::filesystem::file_size(p));
+
+	bool Loaded = FlexKit::LoadFileIntoBuffer(p.string().c_str(), (std::byte*)buffer.data(), buffer.size());// TODO: Make Thread Safe
+	if (!Loaded)
+	{
+		printf("Failed To Load Obj\n");
+		return {};
+	}
+
+
+	MeshUtilityFunctions::OBJ_Tools::LoaderState	S;
+	MeshUtilityFunctions::TokenList					TL{ SystemAllocator };
+
+	char	current_line[512];
+	uint32_t pos		= 0;
+	uint32_t line_pos	= 0;
+	auto size = buffer.size();
+	while(pos < size)
+	{
+		if(buffer[pos] != '\n' )
+		{
+			current_line[line_pos++] = buffer[pos];
+		}
+		else
+		{
+			size_t LineLength = line_pos;
+			current_line[LineLength] = '\0';
+			CStrToToken(MeshUtilityFunctions::ScrubLine(current_line, LineLength), LineLength, TL, S);
+			line_pos = 0;
+		}
+		pos++;
+	}
+
+
+	/*
+PointToken,
+TextureCoordinateToken,
+NormalToken,
+TangentToken,
+MaterialToken,
+JointWeightToken,
+JointIndexToken,
+VertexToken,
+MorphTargetVertexToken
+	*/
+
+	for (const MeshToken& token : TL)
+	{
+		std::visit(
+			Overloaded{
+			[&](const PointToken& point)
+			{
+				shape.AddVertex(point.xyz);
+			},
+			[&](const VertexToken& v)
+			{
+				static_vector<uint32_t, 32> indexes;
+				for (const auto& i : v.vertex)
+				{
+					if(i.type == i.Point)
+						indexes.push_back(i.idx);
+				}
+
+				shape.AddPolygon(indexes.data(), indexes.data() + indexes.size());
+			},
+			[](auto&&) {}},
+			token);
+	}
+
+	return shape;;
+}
+
 struct CBTTerrainState : FlexKit::FrameworkState
 {
 	CBTTerrainState(FlexKit::GameFramework& in_framework) :
@@ -109,48 +190,48 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			{
 			});
 
-		ModifiableShape shape{};
+		ModifiableShape shape = LoadObjIntoShape(R"(assets\cube.obj)");
 
-		const uint32_t face0[] = {
-			shape.AddVertex({   1.0f, -1.0f,   -1.0f }),
-			shape.AddVertex({  -1.0f, -1.0f,   -1.0f }),
-			shape.AddVertex({  -1.0f,  1.0f,   -1.0f }),
-			shape.AddVertex({   1.0f,  1.0f,   -1.0f })
-		};
-
-		const uint32_t face1[] = {
-			face0[1],
-			shape.AddVertex({  -1.0f, -1.0f,   1.0f }),
-			shape.AddVertex({  -1.0f,  1.0f,   1.0f }),
-			face0[2],
-		};
-
-		const uint32_t face2[] = {
-			face1[2], 
-			face1[1],
-			shape.AddVertex({  1.0f, -1.0f,   1.0f }),
-			shape.AddVertex({  1.0f,  1.0f,   1.0f  }),
-		};
-
-		const uint32_t face3[] = {
-			face2[3],
-			face2[2],
-			face0[0],
-			face0[3],
-		};
-
-		const uint32_t face4[] = {
-			face0[3],
-			face0[2],
-			face1[2],
-			face2[3],
-		};
-
-		shape.AddPolygon(face0, face0 + 4);
-		shape.AddPolygon(face1, face1 + 4);
-		shape.AddPolygon(face2, face2 + 4);
-		shape.AddPolygon(face3, face3 + 4);
-		shape.AddPolygon(face4, face4 + 4);
+		//const uint32_t face0[] = {
+		//	shape.AddVertex({   1.0f, -1.0f,   -1.0f }),
+		//	shape.AddVertex({  -1.0f, -1.0f,   -1.0f }),
+		//	shape.AddVertex({  -1.0f,  1.0f,   -1.0f }),
+		//	shape.AddVertex({   1.0f,  1.0f,   -1.0f })
+		//};
+		//
+		//const uint32_t face1[] = {
+		//	face0[1],
+		//	shape.AddVertex({  -1.0f, -1.0f,   1.0f }),
+		//	shape.AddVertex({  -1.0f,  1.0f,   1.0f }),
+		//	face0[2],
+		//};
+		//
+		//const uint32_t face2[] = {
+		//	face1[2], 
+		//	face1[1],
+		//	shape.AddVertex({  1.0f, -1.0f,   1.0f }),
+		//	shape.AddVertex({  1.0f,  1.0f,   1.0f  }),
+		//};
+		//
+		//const uint32_t face3[] = {
+		//	face2[3],
+		//	face2[2],
+		//	face0[0],
+		//	face0[3],
+		//};
+		//
+		//const uint32_t face4[] = {
+		//	face0[3],
+		//	face0[2],
+		//	face1[2],
+		//	face2[3],
+		//};
+		//
+		//shape.AddPolygon(face0, face0 + 4);
+		//shape.AddPolygon(face1, face1 + 4);
+		//shape.AddPolygon(face2, face2 + 4);
+		//shape.AddPolygon(face3, face3 + 4);
+		//shape.AddPolygon(face4, face4 + 4);
 
 		HEMesh = std::make_unique<HalfEdgeMesh>(
 							shape,

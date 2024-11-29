@@ -98,7 +98,7 @@ Vertex2Out MakeWireframeVert(float4 xyzw, float3 d, uint color, uint patchID)
 	Vertex2Out VOut;
 	VOut.v			= xyzw;
 	VOut.patchID	= patchID;
-	VOut.color		= float4(colors[color % 7], 1);
+	VOut.color		= float4(colors[patchID % 7] * 0.5, 1);
 	VOut.d			= d;
 	return VOut;
 }

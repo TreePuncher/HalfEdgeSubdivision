@@ -285,7 +285,7 @@ void InitiateSubdivision(
 	buildArgs.Get().remaining		= args.Get().patchCount;
 	buildArgs.Get().patchCount		= args.Get().patchCount;
 	buildArgs.Get().newPatches		= 0;
-	buildArgs.Get().dispatchSize	= uint3(args.Get().patchCount / 32 + (args.Get().patchCount % 32 == 0 ? 0 : 1), 1, 1);
+	buildArgs.Get().dispatchSize	= uint3(args.Get().patchCount / 256 + (args.Get().patchCount % 256 == 0 ? 0 : 1), 1, 1);
 	
 	buildArgs.OutputComplete();
 }
@@ -341,7 +341,7 @@ void SubdividePatch(TY_points inputPoints, TY_cage inputCage, uint outputDest, i
 		i++;
 		
 		if(i > 32)
-			return;
+			break;
 	}
 
 	points[outputDest][idx + vertexCount - 1] = MakeVertex(facePoint / beginCount.y, 6);
@@ -402,7 +402,7 @@ void SubdivideTwinEdges(RWStructuredBuffer<Vertex> inputPoints, RWStructuredBuff
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
-[NumThreads(32, 1, 1)]
+[NumThreads(256, 1, 1)]
 [NodeMaxDispatchGrid(1024, 1, 1)]
 void BuildBisectorFaces(
 	RWDispatchNodeInputRecord<SubdivisionInit>		buildData,
@@ -412,15 +412,15 @@ void BuildBisectorFaces(
 	if (threadID >= buildData.Get().patchCount)
 		return;
 	
-	const uint2	beginCount	= inputFaces[threadID];
-	const uint	vertexCount = 1 + 2 * beginCount.y;
+	const uint2	halfEdgeRange	= inputFaces[threadID];
+	const uint	vertexCount		= 1 + 2 * halfEdgeRange.y;
 	
 	uint idx;
 	InterlockedAdd(buildData.Get().vertexCounter, vertexCount, idx);
-	InterlockedAdd(buildData.Get().newPatches, beginCount.y);
+	InterlockedAdd(buildData.Get().newPatches, halfEdgeRange.y);
 	GroupMemoryBarrierWithGroupSync();
 	
-	SubdividePatch(inputPoints, inputCage, 0, beginCount, idx, vertexCount);
+	SubdividePatch(inputPoints, inputCage, 0, halfEdgeRange, idx, vertexCount);
 
 	int remaining = 1;
 	InterlockedAdd(buildData.Get().remaining, -1, remaining);
@@ -430,12 +430,16 @@ void BuildBisectorFaces(
 	ThreadNodeOutputRecords<CatmullClarkArgs> subDivArgs = ApplyCCToHalfEdges.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
 	if(remaining == 1)
 	{
-		subDivArgs.Get().remaining		= buildData.Get().patchCount;
-		subDivArgs.Get().patchCount		= buildData.Get().patchCount;
+		const uint32_t patchCount	= buildData.Get().newPatches;
+		const uint32_t dispatchX	= patchCount / 256 + (patchCount % 256 == 0? 0 : 1);
+		
+		subDivArgs.Get().remaining		= patchCount;
+		subDivArgs.Get().patchCount		= patchCount;
 		subDivArgs.Get().source			= 0;
 		subDivArgs.Get().target			= 1;
-		subDivArgs.Get().dispatchSize	= uint3(1, 1, 1);
+		subDivArgs.Get().dispatchSize	= uint3(dispatchX, 1, 1);
 	}
+
 	subDivArgs.OutputComplete();
 
 	Barrier(points[0], DEVICE_SCOPE);
@@ -448,8 +452,8 @@ void BuildBisectorFaces(
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
-[NodeDispatchGrid(1, 1, 1)]
-[NumThreads(32, 1, 1)]
+[NodeMaxDispatchGrid(1024, 1, 1)]
+[NumThreads(256, 1, 1)]
 void ApplyCCToHalfEdges(
 	const uint										threadID : SV_DispatchThreadID,
 	RWDispatchNodeInputRecord<CatmullClarkArgs>		args,
@@ -553,16 +557,19 @@ void ApplyCCToHalfEdges(
 	ThreadNodeOutputRecords<SubdivisionArgs> subdivArgs = SubdivideTwinEdgeTask0.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
 	if(remaining == 1)
 	{
-		subdivArgs.Get().remaining		= args.Get().patchCount * 4;
-		subdivArgs.Get().patchCount		= args.Get().patchCount * 4;
+		const uint32_t patchCount	= args.Get().patchCount;
+		const uint32_t dispatchX	= patchCount / 256 + (patchCount % 256 == 0 ? 0 : 1);
+	
+		subdivArgs.Get().remaining		= patchCount;
+		subdivArgs.Get().patchCount		= patchCount;
 		subdivArgs.Get().input			= 1;
 		subdivArgs.Get().output			= 2;
-		subdivArgs.Get().dispatchSize	= uint3(5, 1, 1);
+		subdivArgs.Get().dispatchSize	= uint3(dispatchX, 1, 1);
 	}
-
+	
 	Barrier(points[0], DEVICE_SCOPE);
 	Barrier(cages[0], DEVICE_SCOPE);
-
+	
 	subdivArgs.OutputComplete();
 }
 
@@ -679,7 +686,7 @@ void ApplyCCToTwinEdges(const uint threadID, in CatmullClarkArgs args)
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
-[NumThreads(32, 1, 1)]
+[NumThreads(256, 1, 1)]
 [NodeMaxDispatchGrid(1024, 1, 1)]
 void SubdivideTwinEdgeTask0(
 	RWDispatchNodeInputRecord<SubdivisionArgs>		args,
@@ -702,13 +709,16 @@ void SubdivideTwinEdgeTask0(
 	ThreadNodeOutputRecords<CatmullClarkArgs> subDivArgs = ApplyCCToTwinEdges0.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
 	if (remaining == 1)
 	{
+		const uint32_t patchCount	= args.Get().patchCount;
+		const uint32_t dispatchX	= patchCount / 256 + (patchCount % 256 == 0 ? 0 : 1);
+	
 		subDivArgs.Get().source			= 0;
 		subDivArgs.Get().target			= 1;
-		subDivArgs.Get().remaining		= args.Get().patchCount;
-		subDivArgs.Get().patchCount		= args.Get().patchCount;
-		subDivArgs.Get().dispatchSize	= uint3(args.Get().patchCount / 32 + (args.Get().patchCount % 32 == 0 ? 0 : 1), 1, 1);
+		subDivArgs.Get().remaining		= patchCount;
+		subDivArgs.Get().patchCount		= patchCount;
+		subDivArgs.Get().dispatchSize	= uint3(dispatchX, 1, 1);
 	}
-
+	
 	subDivArgs.OutputComplete();
 }
 
@@ -718,7 +728,7 @@ void SubdivideTwinEdgeTask0(
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
-[NumThreads(32, 1, 1)]
+[NumThreads(256, 1, 1)]
 [NodeMaxDispatchGrid(1024, 1, 1)]
 void SubdivideTwinEdgeTask1(
 	RWDispatchNodeInputRecord<SubdivisionArgs>		args,
@@ -742,11 +752,14 @@ void SubdivideTwinEdgeTask1(
 	ThreadNodeOutputRecords<CatmullClarkArgs> subDivArgs = ApplyCCToTwinEdges1.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
 	if (remaining == 1)
 	{
+		const uint32_t patchCount	= args.Get().patchCount;
+		const uint32_t dispatchX	= patchCount / 256 + (patchCount % 256 == 0 ? 0 : 1);
+		
 		subDivArgs.Get().source			= 1;
 		subDivArgs.Get().target			= 2;
-		subDivArgs.Get().remaining		= args.Get().patchCount;
-		subDivArgs.Get().patchCount		= args.Get().patchCount;
-		subDivArgs.Get().dispatchSize	= uint3((args.Get().patchCount) / 32 + ((args.Get().patchCount) % 32 == 0 ? 0 : 1), 1, 1);
+		subDivArgs.Get().remaining		= patchCount;
+		subDivArgs.Get().patchCount		= patchCount;
+		subDivArgs.Get().dispatchSize	= uint3(dispatchX, 1, 1);
 	}
 	
 	subDivArgs.OutputComplete();
@@ -758,7 +771,7 @@ void SubdivideTwinEdgeTask1(
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
-[NumThreads(32, 1, 1)]
+[NumThreads(256, 1, 1)]
 [NodeMaxDispatchGrid(1024, 1, 1)]
 void ApplyCCToTwinEdges0(
 	const uint										threadID : SV_DispatchThreadID,
@@ -773,18 +786,21 @@ void ApplyCCToTwinEdges0(
 	GroupMemoryBarrierWithGroupSync();
 	
 	ThreadNodeOutputRecords<SubdivisionArgs> subdivArgs = SubdivideTwinEdgeTask1.GetThreadNodeOutputRecords(remaining == 1 ? 1 : 0);
-	if(remaining == 1)
+	if(remaining == 1 && args.Get().patchCount > 0)
 	{
-		subdivArgs.Get().remaining		= args.Get().patchCount * 4;
-		subdivArgs.Get().patchCount		= args.Get().patchCount * 4;
+		const uint32_t patchCount	= args.Get().patchCount * 4;
+		const uint32_t dispatchX	= patchCount / 256 + (patchCount % 256 == 0 ? 0 : 1);
+	
+		subdivArgs.Get().remaining		= patchCount;
+		subdivArgs.Get().patchCount		= patchCount;
 		subdivArgs.Get().input			= 1;
 		subdivArgs.Get().output			= 2;
-		subdivArgs.Get().dispatchSize	= uint3(7, 1, 1);
+		subdivArgs.Get().dispatchSize	= uint3(dispatchX, 1, 1);
 	}
-
+	
 	Barrier(points[0], DEVICE_SCOPE);
 	Barrier(cages[0], DEVICE_SCOPE);
-
+	
 	subdivArgs.OutputComplete();
 }
 
@@ -794,7 +810,7 @@ void ApplyCCToTwinEdges0(
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
-[NumThreads(32, 1, 1)]
+[NumThreads(256, 1, 1)]
 [NodeMaxDispatchGrid(1024, 1, 1)]
 void ApplyCCToTwinEdges1(
 	const uint									threadID : SV_DispatchThreadID,

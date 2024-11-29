@@ -27,8 +27,6 @@ namespace FlexKit
 				.next = edge.next,
 				.prev = edge.prev,
 				.vert = edge.vertices[0],
-				//.face = edge.face,
-				//.edge = (uint32_t)idx
 			};
 
 			halfEdges.push_back(hEdge);
@@ -59,9 +57,9 @@ namespace FlexKit
 		controlPoints		= IN_renderSystem.CreateGPUResource(GPUResourceDesc::StructuredResource(meshPoints.ByteSize()));
 		controlCageSize		= halfEdges.size();
 		controlCageFaces	= faces.size();
-		const uint32_t level0PointCount = shape.wFaces.size() + shape.wEdges.size() * 2;
-		const uint32_t level1PointCount = level0PointCount * 4;
-		const uint32_t level2PointCount = level1PointCount * 4;
+		const uint32_t level0PointCount = (shape.wFaces.size() + shape.wEdges.size()) * 2;
+		const uint32_t level1PointCount = level0PointCount * 6;
+		const uint32_t level2PointCount = level1PointCount * 6;
 
 		levels[0] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(halfEdges.ByteSize() * 4));
 		levels[1] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(halfEdges.ByteSize() * 16));
@@ -292,7 +290,7 @@ namespace FlexKit
 					subDivData.inputCage		= builder.NonPixelShaderResource(levels[levelsBuilt - 1]);
 					subDivData.inputVerts		= builder.NonPixelShaderResource(points[levelsBuilt - 1]);
 					subDivData.inputEdgeCount	= controlCageSize;
-					subDivData.faceCount		= 10;//controlCageFaces << (levelsBuilt * 2);
+					subDivData.faceCount		= controlCageFaces << (levelsBuilt * 2);
 					edgeCount[levelsBuilt]		= edgeCount[levelsBuilt - 1] * 4;
 
 					subDivData.outputCage		= builder.UnorderedAccess(levels[levelsBuilt]);
