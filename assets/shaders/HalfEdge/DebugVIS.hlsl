@@ -98,7 +98,7 @@ Vertex2Out MakeWireframeVert(float4 xyzw, float3 d, uint color, uint patchID)
 	Vertex2Out VOut;
 	VOut.v			= xyzw;
 	VOut.patchID	= patchID;
-	VOut.color		= float4(colors[patchID % 7] * 0.5, 1);
+	VOut.color		= float4(colors[color % 7] * 0.5, 1);
 	VOut.d			= d;
 	return VOut;
 }
@@ -157,13 +157,16 @@ void MeshMain(
 [OutputTopology("triangle")]
 void WireMain(
 	const uint					threadID : SV_DispatchThreadID,
+	const uint					groupID  : SV_GroupID,
 	out indices		uint3		tris[64],
 	out vertices	Vertex2Out	verts[192])
 {
 	if (threadID >= patchCount)
 		return;
 	
-	SetMeshOutputCounts(128, 64);
+	const uint primitiveCount = (groupID < patchCount / 32) ? 64 : 2 * (patchCount % 32);
+	
+	SetMeshOutputCounts(128, primitiveCount);
 	
 	TwinEdge he0 = twinEdges[4 * threadID + 0];
 	TwinEdge he1 = twinEdges[4 * threadID + 1];

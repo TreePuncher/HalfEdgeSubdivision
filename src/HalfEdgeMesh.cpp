@@ -19,11 +19,14 @@ namespace FlexKit
 		halfEdges.reserve(shape.wEdges.size());
 		for (const auto&& [idx, edge] : std::views::enumerate(shape.wEdges))
 		{
-			auto t = shape.IsEdgeVertex(edge.vertices[0]);
-			bool c = shape.GetVertexValence(edge.vertices[0]) == 2;
+			auto t			= shape.IsEdgeVertex(edge.vertices[0]);
+			bool c			= shape.GetVertexValence(edge.vertices[0]) == 2;
+			bool isOnEdge	= shape.IsEdgeVertex(edge.vertices[0]);
+			
 			HEEdge hEdge
 			{
-				.twin = shape.GetVertexValence(edge.vertices[0]) == 2 ? ((edge.twin & (0xffffffff >> 1)) | (1 << 31)) : (edge.twin & (0xffffffff >> 1)),
+				//.twin = shape.GetVertexValence(edge.vertices[0]) == 2 ? ((edge.twin & (0xffffffff >> 1)) | (1 << 31)) : (edge.twin & (0xffffffff >> 1)),
+				.twin = isOnEdge ? ((edge.twin & (0xffffffff >> 1)) | (1 << 31)) : (edge.twin & (0xffffffff >> 1)),
 				.next = edge.next,
 				.prev = edge.prev,
 				.vert = edge.vertices[0],
@@ -33,14 +36,24 @@ namespace FlexKit
 		}
 
 		uint32_t edgeCount = 0;
+		uint32_t vertexCount = 0;
 		Vector<FlexKit::uint2> faces{ IN_allocator };
 		faces.reserve(shape.wFaces.size());
 		for (const auto& face : shape.wFaces)
 		{ 
-			faces.emplace_back(face.edgeStart, (uint32_t)face.GetEdgeCount(shape));
-			edgeCount += (uint32_t)face.GetEdgeCount(shape);
+			auto faceEdgeCount = (uint32_t)face.GetEdgeCount(shape);
+			faces.emplace_back(face.edgeStart, faceEdgeCount);
+			edgeCount += faceEdgeCount;
+			vertexCount += 1 + 2 * faceEdgeCount;
 		}
 		
+		std::cout << "Half edge count: " << edgeCount << "\n";
+		std::cout << "L0 Half edge count: " << edgeCount * 4 << "\n";
+		std::cout << "L1 Half edge count: " << edgeCount * 16 << "\n";
+		std::cout << "L2 Half edge count: " << edgeCount * 64 << "\n";
+		std::cout << "Vertex count: " << vertexCount << "\n";
+
+
 		Vector<HalfEdgeVertex> meshPoints{ IN_allocator };
 		meshPoints.resize(shape.wVertices.size());
 		for (const auto&& [idx, point] : std::views::enumerate(shape.wVertices))
@@ -58,8 +71,8 @@ namespace FlexKit
 		controlCageSize		= halfEdges.size();
 		controlCageFaces	= faces.size();
 		const uint32_t level0PointCount = (shape.wFaces.size() + shape.wEdges.size()) * 2;
-		const uint32_t level1PointCount = level0PointCount * 6;
-		const uint32_t level2PointCount = level1PointCount * 6;
+		const uint32_t level1PointCount = level0PointCount * 9;
+		const uint32_t level2PointCount = level1PointCount * 9;
 
 		levels[0] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(halfEdges.ByteSize() * 4));
 		levels[1] = IN_renderSystem.CreateGPUResource(GPUResourceDesc::UAVResource(halfEdges.ByteSize() * 16));
@@ -163,7 +176,7 @@ namespace FlexKit
 						return FlexKit::PipelineBuilder{ allocator }.
 							AddMeshShader("MeshMain",	"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
 							AddPixelShader("PMain",		"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
-							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE }).
+							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::BACK }).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
 									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).
@@ -179,7 +192,7 @@ namespace FlexKit
 						return FlexKit::PipelineBuilder{ allocator }.
 							AddMeshShader("WireMain",			"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
 							AddPixelShader("WhiteWireframe",	"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
-							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE }).
+							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::FRONT }).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
 									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).

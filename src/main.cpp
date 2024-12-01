@@ -179,8 +179,12 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		sub.Notify	= &FlexKit::EventsWrapper;
 		sub._ptr	= &framework;
 		renderWindow->Handler.Subscribe(sub);
-		renderWindow->SetWindowTitle("HelloWorld");
 
+#if _DEBUG
+		renderWindow->SetWindowTitle("HelloWorld-Debug");
+#else
+		renderWindow->SetWindowTitle("HelloWorld");
+#endif
 
 		constantBuffer	= renderSystem.CreateConstantBuffer(MEGABYTE, false);
 		vertexBuffer	= renderSystem.CreateVertexBuffer(512, false);
@@ -190,55 +194,58 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			{
 			});
 
-		ModifiableShape shape = LoadObjIntoShape(R"(assets\cube.obj)");
+#if 1
+		ModifiableShape shape = LoadObjIntoShape(R"(assets\blossom.obj)");
+#else
+		ModifiableShape shape{};
+		const uint32_t face0[] = {
+			shape.AddVertex({   1.0f, -1.0f,   -1.0f }),
+			shape.AddVertex({  -1.0f, -1.0f,   -1.0f }),
+			shape.AddVertex({  -1.0f,  1.0f,   -1.0f }),
+			shape.AddVertex({   1.0f,  1.0f,   -1.0f })
+		};
+		
+		const uint32_t face1[] = {
+			face0[1],
+			shape.AddVertex({  -1.0f, -1.0f,   1.0f }),
+			shape.AddVertex({  -1.0f,  1.0f,   1.0f }),
+			face0[2],
+		};
+		
+		const uint32_t face2[] = {
+			face1[2], 
+			face1[1],
+			shape.AddVertex({  1.0f, -1.0f,   1.0f }),
+			shape.AddVertex({  1.0f,  1.0f,   1.0f  }),
+		};
+		
+		const uint32_t face3[] = {
+			face2[3],
+			face2[2],
+			face0[0],
+			face0[3],
+		};
+		
+		const uint32_t face4[] = {
+			face0[3],
+			face0[2],
+			face1[2],
+			face2[3],
+		};
+		
+		shape.AddPolygon(face0, face0 + 4);
+		shape.AddPolygon(face1, face1 + 4);
+		shape.AddPolygon(face2, face2 + 4);
+		shape.AddPolygon(face3, face3 + 4);
+		shape.AddPolygon(face4, face4 + 4);
 
-		//const uint32_t face0[] = {
-		//	shape.AddVertex({   1.0f, -1.0f,   -1.0f }),
-		//	shape.AddVertex({  -1.0f, -1.0f,   -1.0f }),
-		//	shape.AddVertex({  -1.0f,  1.0f,   -1.0f }),
-		//	shape.AddVertex({   1.0f,  1.0f,   -1.0f })
-		//};
-		//
-		//const uint32_t face1[] = {
-		//	face0[1],
-		//	shape.AddVertex({  -1.0f, -1.0f,   1.0f }),
-		//	shape.AddVertex({  -1.0f,  1.0f,   1.0f }),
-		//	face0[2],
-		//};
-		//
-		//const uint32_t face2[] = {
-		//	face1[2], 
-		//	face1[1],
-		//	shape.AddVertex({  1.0f, -1.0f,   1.0f }),
-		//	shape.AddVertex({  1.0f,  1.0f,   1.0f  }),
-		//};
-		//
-		//const uint32_t face3[] = {
-		//	face2[3],
-		//	face2[2],
-		//	face0[0],
-		//	face0[3],
-		//};
-		//
-		//const uint32_t face4[] = {
-		//	face0[3],
-		//	face0[2],
-		//	face1[2],
-		//	face2[3],
-		//};
-		//
-		//shape.AddPolygon(face0, face0 + 4);
-		//shape.AddPolygon(face1, face1 + 4);
-		//shape.AddPolygon(face2, face2 + 4);
-		//shape.AddPolygon(face3, face3 + 4);
-		//shape.AddPolygon(face4, face4 + 4);
-
+#endif
 		HEMesh = std::make_unique<HalfEdgeMesh>(
 							shape,
 							framework.GetRenderSystem(), 
 							framework.core.GetBlockMemory(), 
 							framework.core.GetTempMemory());
-
+		if (1)
 		runOnce.push_back(
 			[&](FlexKit::FrameGraph& frameGraph) 
 			{
@@ -248,8 +255,10 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		auto& cameraNode	= camera.AddView<SceneNodeView>();
 		auto& orbitCamera	= camera.AddView<OrbitCameraBehavior>();
 
-		orbitCamera.acceleration = 50.0f;
-		orbitCamera.TranslateWorld({  0.0f, 0.0f, 5.0f });
+		shape.Build();
+
+		orbitCamera.acceleration = 10.0f;
+		orbitCamera.TranslateWorld({  0.0f, shape.GetAABB().MidPoint().y, 5.0f });
 		orbitCamera.SetCameraFOV(0.523599);
 		orbitCamera.SetCameraAspectRatio(1920.0f / 1080.0f);
 
@@ -358,11 +367,16 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		cameraUpdate.AddInput(transformUpdate);
 
+
 		if (auto orbitCamera = camera.GetView<FlexKit::OrbitCameraBehavior>(); orbitCamera)
 			transformUpdate.AddInput(QueueOrbitCameraUpdateTask(dispatcher, *orbitCamera, renderWindow->mouseState, dT));
 
-		if(HEMesh && activeCamera != FlexKit::InvalidHandle)
+
+		if (HEMesh && activeCamera != FlexKit::InvalidHandle)
+		{
+			//HEMesh->BuildAllSubDivLevel(frameGraph);
 			HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer(), depthBuffer.Get(), adaptiveLODlevel);
+		}
 
 		PresentBackBuffer(frameGraph, renderWindow->GetBackBuffer());
 
@@ -469,7 +483,12 @@ struct CBTTerrainState : FlexKit::FrameworkState
 int main(int argc, const char* argv[])
 {
 	auto memory = FlexKit::CreateEngineMemory();
-	FlexKit::FKApplication app{ memory, FlexKit::CoreOptions{ .GPUdebugMode = true } };
+	FlexKit::FKApplication app{ memory, 
+		FlexKit::CoreOptions{ 
+			.GPUdebugMode	= true,
+			.GPUValidation	= true,
+			.GPUSyncQueues	= true,
+	} };
 
 	app.PushState<CBTTerrainState>();
 	app.Run();
