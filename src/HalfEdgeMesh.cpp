@@ -80,7 +80,7 @@ namespace FlexKit
 
 		controlCageSize		= halfEdges.size();
 		controlCageFaces	= faces.size();
-		const uint32_t level0PointCount = (shape.wFaces.size() + shape.wEdges.size()) * 2;
+		const uint32_t level0PointCount = (shape.wFaces.size() + shape.wEdges.size() * 2);
 		const uint32_t level1PointCount = level0PointCount * 9;
 		const uint32_t level2PointCount = level1PointCount * 9;
 
@@ -148,6 +148,7 @@ namespace FlexKit
 				builder.SetParameterAsDescriptorTable(5, heap1);
 				builder.SetParameterAsCBV(6, 1);
 				builder.SetParameterAsSRV(7, 3);
+				builder.SetParameterAsUAV(8, 0);
 				globalRoot = builder.Build(IN_renderSystem, IN_temp);
 
 				updateState = LibraryBuilder{ IN_temp }.
@@ -523,7 +524,7 @@ namespace FlexKit
 				subDivData.constantSpace		= builder.AcquireVirtualResource(GPUResourceDesc::StructuredResource(1024), DASCopyDest);
 
 				subDivData.meshDrawInfo		= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASCopyDest);
-				subDivData.meshDrawFaces	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1 * MEGABYTE), DASCopyDest);
+				subDivData.meshDrawFaces	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1 * MEGABYTE), DASUAV);
 			},
 			[this, camera](BuildLevels& subDivData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
@@ -563,6 +564,7 @@ namespace FlexKit
 				ctx.SetComputeShaderResourceView(3, resources.GetResource(subDivData.InputFaces));
 				ctx.SetComputeConstantBufferView(6, resources.NonPixelShaderResource(subDivData.constantSpace, ctx, Sync_Copy, Sync_Compute));
 				ctx.SetComputeShaderResourceView(7, resources.GetResource(subDivData.faceLookup));
+				ctx.SetComputeUnorderedAccessView(8, resources.GetResource(subDivData.meshDrawFaces));
 
 				DescriptorHeap cages;
 				DescriptorHeap points;
@@ -580,15 +582,18 @@ namespace FlexKit
 
 				ctx.DeviceContext->SetProgram(&setProgram);
 
-				const uint dispatchX = 1;// patchCount[0] / 1024 + (patchCount[0] % 1024 == 0 ? 0 : 1);
-				
+				const uint dispatchX = controlCageFaces / 32 + (controlCageFaces % 32 == 0 ? 0 : 1);
 				struct
 				{
-					uint patchCount;
-					uint halfEdgeCount;
+					uint	dispatchesRemaining;
+					uint	patchCount;
+					uint	halfEdgeCount;
+					uint3	xyz;
 				}	const arguments{
-					.patchCount		= controlCageFaces,
-					.halfEdgeCount	= patchCount[0]
+					.dispatchesRemaining	= dispatchX,
+					.patchCount				= 0,//controlCageFaces,
+					.halfEdgeCount			= 0,//patchCount[0], 
+					.xyz					= uint3(dispatchX, 1, 1),
 				};
 
 				ctx.FlushBarriers();
@@ -656,8 +661,6 @@ namespace FlexKit
 				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(visData.inputVerts, ctx, Sync_Compute, Sync_All));
 				ctx.SetGraphicsShaderResourceView(2, resources.NonPixelShaderResource(visData.inputFaces, ctx, Sync_Compute, Sync_All));
 				ctx.SetGraphicsShaderResourceView(3, resources.NonPixelShaderResource(visData.faceLookup, ctx, Sync_Compute, Sync_All));
-				//ctx.SetGraphicsShaderResourceView(3, resources.GetResource(visData.faceLookup));
-
 
 				struct {
 					float4x4_GPU	PV;

@@ -120,19 +120,12 @@ void MeshMain(
 	if (threadID >= patchCount)
 		return;
 	
-	//SetMeshOutputCounts(128, 64);
-	
 	const uint patchID			= faceLookup[threadID];
 	const HE_Face face			= faces[patchID];
 	
 	TwinEdge edges[4];
 	GetTwinEdges(face, 0, edges, inputCage);
 	
-	//TwinEdge he0 = twinEdges[4 * threadID + 0];
-	//TwinEdge he1 = twinEdges[4 * threadID + 1];
-	//TwinEdge he2 = twinEdges[4 * threadID + 2];
-	//TwinEdge he3 = twinEdges[4 * threadID + 3];
-	//	
 	verts[4 * (threadID % 32) + 0] = MakeVert(inputVerts[edges[0].vert], threadID);
 	verts[4 * (threadID % 32) + 1] = MakeVert(inputVerts[edges[1].vert], threadID);
 	verts[4 * (threadID % 32) + 2] = MakeVert(inputVerts[edges[2].vert], threadID);
@@ -185,10 +178,12 @@ void WireMain(
 	tris[2 * (threadID % 32) + 1] = uint3(6 * (threadID % 32) + 3, 6 * (threadID % 32) + 4, 6 * (threadID % 32) + 5);	
 }
 
+
 float4 PMain(VertexOut vIn) : SV_Target
 {
 	return vIn.color;
 }
+
 
 float4 WhiteWireframe(Vertex2Out IN) : SV_Target
 {

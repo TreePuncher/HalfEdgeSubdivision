@@ -10,6 +10,7 @@ StructuredBuffer<HalfEdge>	inputCage	: register(t0);
 StructuredBuffer<Vertex>	inputPoints : register(t1);
 StructuredBuffer<HE_Face>	inputFaces	: register(t2);
 StructuredBuffer<uint>		faceLookup	: register(t3);
+RWStructuredBuffer<HE_Face>	outFaces	: register(u0, space0);
 
 RWStructuredBuffer<TwinEdge>	cages[]		: register(u0, space1);
 RWStructuredBuffer<Vertex>		points[]	: register(u0, space2);
@@ -105,31 +106,6 @@ void BuildBaseCage(
 
 	const HE_Face face = inputFaces[dispatchThreadID];
 
-	float3 f = float3(0, 0, 0);
-#define CULL 0
-#if CULL
-	AABB aabb;
-	aabb.mMin = float3( 100000,  100000,  100000);
-	aabb.mMax = float3(-100000, -100000, -100000);
-	
-	uint internalEdges		= 0;
-	uint internalVertices	= 0;
-
-	for(int i = 0; i < range.y; i++)
-	{	
-		HalfEdge he = inputCage[range.x + i];
-		
-		internalEdges		+= !he.Border();
-		internalVertices	+= !he.IsT();
-
-		const float3 xyz = inputPoints[he.vert].xyz;
-		f += xyz;
-		aabb.Add(mul(view, float4(xyz, 1)));
-	}
-	
-	if(Intersects(frustum, aabb))
-#endif
-	
 	for(int i = 0; i < face.edgeCount; i++)
 	{	
 		const uint outputIdx = 4 * (face.begin + i);
@@ -147,10 +123,22 @@ void BuildBaseCage(
 
 /************************************************************************************************/
 
+
+struct BuildFace2Args
+{
+	uint	patchCount;
+	uint	edgeCount;
+	HE_Face faces[32];
+	uint3	dispatchSize : SV_DispatchGrid;
+};
+
+
 struct LaunchSubDivParams
 {
-	uint patchCount;
-	uint halfEdgeCount;
+	uint	dispatchesRemaining;
+	uint	patchCount;
+	uint	halfEdgeCount;
+	uint3	xyz  : SV_DispatchGrid;
 };
 
 struct BuildFacesArgs
@@ -167,17 +155,81 @@ struct BuildEdgesArgs
 };
 
 
+groupshared uint			localPatchCount;
+groupshared uint			localEdgeCount;
+
 [Shader("node")]
 [NodeLaunch("broadcasting")]
-[NodeDispatchGrid(1, 1, 1)]
-[NumThreads(1, 1, 1)]
+[NodeMaxDispatchGrid(16000, 1, 1)]
+[NumThreads(32, 1, 1)]
 void SubdivideHalfEdgeMesh(
-					DispatchNodeInputRecord<LaunchSubDivParams>	args,
-	[MaxRecords(1)]	NodeOutput<BuildFacesArgs>					BuildFaces,
-	[MaxRecords(1)]	NodeOutput<BuildEdgesArgs>					BuildEdges,
-	[MaxRecords(1)]	NodeOutput<BuildEdgesArgs>					BuildVertices,
-					const uint									dispatchThreadID : SV_DispatchThreadID)
+						RWDispatchNodeInputRecord<LaunchSubDivParams>	args,
+	[MaxRecords(1)]		NodeOutput<BuildFace2Args>						BuildEdges2,
+	//[MaxRecords(1)]	NodeOutput<BuildFacesArgs>						BuildFaces,
+	//[MaxRecords(1)]	NodeOutput<BuildEdgesArgs>						BuildEdges,
+	//[MaxRecords(1)]	NodeOutput<BuildEdgesArgs>						BuildVertices,
+					const uint										dispatchThreadID	: SV_DispatchThreadID, 
+					const uint										groupDispatchID		: SV_GroupIndex)
 {
+	if(dispatchThreadID >= patchCount)
+		return;
+
+	if(groupDispatchID == 0)	
+	{
+		localPatchCount = 0;
+		localEdgeCount = 0;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+	
+	const HE_Face face = inputFaces[dispatchThreadID];
+
+	AABB aabb;
+	aabb.mMin = float3( 100000,  100000,  100000);
+	aabb.mMax = float3(-100000, -100000, -100000);
+	
+	float3 f = float3(0, 0, 0);
+	for(int i = 0; i < face.edgeCount; i++)
+	{	
+		HalfEdge he = inputCage[face.begin + i];
+		
+		const float3 xyz = inputPoints[he.vert].xyz;
+		f += xyz;
+		aabb.Add(mul(view, float4(xyz, 1)));
+	}
+	
+	const bool intersects = Intersects(frustum, aabb);
+	uint patchIdx;
+	uint edgeIdx;
+	
+	if(intersects)
+	{
+		InterlockedAdd(args.Get().patchCount, 1), 
+		InterlockedAdd(args.Get().halfEdgeCount, face.edgeCount);
+		InterlockedAdd(localPatchCount, 1, patchIdx);
+		InterlockedAdd(localEdgeCount,	face.edgeCount, edgeIdx);
+
+		const uint	vertexCount	= face.GetVertexCount();
+		points[0][face.vertexRange + vertexCount - 1].xyz	= f / face.edgeCount;
+		points[0][face.vertexRange + vertexCount - 1].color	= 6;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+	GroupNodeOutputRecords<BuildFace2Args> dispatchEdges = BuildEdges2.GetGroupNodeOutputRecords(intersects);
+	
+	if(intersects)
+		dispatchEdges[0].faces[patchIdx] = face;
+	
+	if(groupDispatchID == 0)
+	{
+		dispatchEdges[0].edgeCount		= localEdgeCount;
+		dispatchEdges[0].patchCount		= localPatchCount;
+		dispatchEdges[0].dispatchSize	= uint3(localEdgeCount / 32 + (localEdgeCount % 32 == 0 ? 0 : 1), 1, 1); 
+	}
+
+	dispatchEdges.OutputComplete();
+
+#if 0
 	const uint patchCount		= args.Get().patchCount;
 	const uint halfEdgeCount	= args.Get().halfEdgeCount;
 
@@ -196,6 +248,7 @@ void SubdivideHalfEdgeMesh(
 	launchVertex.Get().halfEdgeCount	= halfEdgeCount;
 	launchVertex.Get().dispatchSize		= uint3(halfEdgeCount / 1024 + (halfEdgeCount % 1024 == 0 ? 0 : 1), 1, 1);
 	launchVertex.OutputComplete();
+#endif
 }
 
 
@@ -267,6 +320,10 @@ void BuildEdges(
 		points[0][vertexID].color	= 6;
 	}
 }
+
+
+/************************************************************************************************/
+
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
@@ -378,12 +435,14 @@ void BuildVertices(
 }
 
 
+/************************************************************************************************/
+
+
 [Shader("node")]
 [NodeLaunch("broadcasting")]
 [NodeMaxDispatchGrid(16000, 1, 1)]
 [NumThreads(1024, 1, 1)]
 void BuildFaces(RWDispatchNodeInputRecord<BuildFacesArgs>	args,
-				[MaxRecords(1)]	NodeOutput<BuildEdgesArgs>	BuildEdges,
 				const uint dispatchThreadID : SV_DispatchThreadID)
 {
 	if (dispatchThreadID >= patchCount)
@@ -394,12 +453,190 @@ void BuildFaces(RWDispatchNodeInputRecord<BuildFacesArgs>	args,
 
 	points[0][face.vertexRange + vertexCount - 1].xyz	= GetFacePoint(face.begin);
 	points[0][face.vertexRange + vertexCount - 1].color	= 6;
-
-	uint idx = 0;
-	InterlockedAdd(args.Get().remaining, -1, idx);	
-	Barrier(points[0], DEVICE_SCOPE);
 }
 
+
+/************************************************************************************************/
+
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NodeMaxDispatchGrid(16000, 1, 1)]
+[NodeShareInputOf("BuildEdges2")]
+[NumThreads(32, 1, 1)]
+void BuildVertices2(DispatchNodeInputRecord<BuildFace2Args>	args,
+					const uint								dispatchThreadID : SV_DispatchThreadID)
+{
+	if (dispatchThreadID >= args.Get().edgeCount)
+		return;
+	
+	HE_Face face	= args.Get().faces[0];
+	uint edgeCount	= 0;
+	
+	for (int i = 0; i < args.Get().patchCount; i++)
+	{
+		edgeCount += face.edgeCount;
+		if (dispatchThreadID < edgeCount)
+			break;
+		else
+			face = args.Get().faces[i + 1];
+	}
+	
+	const uint faceEdgeID	= (dispatchThreadID - edgeCount) % face.edgeCount;
+	const uint32_t vertexID = face.vertexRange + ((dispatchThreadID - face.vertexRange) % face.edgeCount) * 2 + 0;
+	const uint32_t edgeID	= face.begin + dispatchThreadID % face.edgeCount;
+	
+	HalfEdge he	= inputCage[edgeID];
+	
+	if (he.IsT())
+	{		
+		uint32_t n				= 2; 
+		uint32_t prevSelection	= edgeID;
+		uint32_t selection		= RotateSelectionCCW(inputCage, edgeID);
+
+		while(selection != BORDERVALUE)
+		{
+			n++;
+			prevSelection	= selection;
+			selection		= RotateSelectionCCW(inputCage, selection);
+			
+			if (n > 16)
+			{
+				const float3 p0				= inputPoints[he.vert].xyz;
+				points[0][vertexID].xyz		= p0;
+				points[0][vertexID].color	= 1;
+				return;
+			}
+		}
+
+		const uint32_t selection0 = prevSelection;
+
+		prevSelection	= edgeID;
+		selection		= RotateSelectionCW(inputCage, edgeID);
+		while(selection != BORDERVALUE)
+		{
+			n++;
+			prevSelection	= selection;
+			selection		= RotateSelectionCW(inputCage, selection);
+		
+			if (n > 16)
+			{
+				const float3 p0				= inputPoints[he.vert].xyz;
+				points[0][vertexID].xyz		= p0;
+				points[0][vertexID].color	= 1;
+				return;
+			}
+		}
+			
+		const uint32_t selection1 = prevSelection;
+
+		if (selection0 != BORDERVALUE && selection0 != BORDERVALUE && n > 2)
+		{
+			const float3 p0 = inputPoints[inputCage[Next(inputCage, selection0)].vert].xyz;
+			const float3 p1 = inputPoints[he.vert].xyz;
+			const float3 p2 = inputPoints[inputCage[Prev(inputCage, selection1)].vert].xyz;	
+			points[0][vertexID].xyz		= (p0 + 6 * p1 + p2) / 8.0f;
+			points[0][vertexID].color	= 6;
+		}
+		else
+		{
+			const float3 p0 = inputPoints[he.vert].xyz;
+			points[0][vertexID].xyz		= p0;
+			points[0][vertexID].color	= 6;
+		}
+	}
+	else
+	{
+		float3	p0	= inputPoints[he.vert].xyz;
+		float3	Q	= GetFacePoint(edgeID);
+		float3	R	= lerp(p0, inputPoints[inputCage[Next(inputCage, edgeID)].vert].xyz, 0.5f);
+		float	n	= 1.0f;
+		
+		uint32_t selection = RotateSelectionCCW(inputCage, edgeID);
+		while(selection != edgeID)
+		{
+			n += 1.0f;
+			Q += GetFacePoint(selection);
+			R += lerp(p0, inputPoints[inputCage[Next(inputCage, selection)].vert].xyz, 0.5);
+			selection = RotateSelectionCCW(inputCage, selection);
+					
+			if(n >= 16)
+			{
+				points[0][vertexID].xyz		= p0;
+				points[0][vertexID].color	= 2;
+				return;
+			}
+		}
+		
+		if(selection != BORDERVALUE)
+		{
+			Q /= n;
+			R /= n;
+
+			points[0][vertexID].xyz		= (Q + 2 * R + p0 * (n - 3)) / n;
+			points[0][vertexID].color	= 6;
+		}
+	}
+}
+
+
+/************************************************************************************************/
+
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NodeMaxDispatchGrid(16000, 1, 1)]
+[NumThreads(32, 1, 1)]
+void BuildEdges2(	DispatchNodeInputRecord<BuildFace2Args>	args,
+					const uint								dispatchThreadID : SV_DispatchThreadID)
+{
+	if (dispatchThreadID >= args.Get().edgeCount)
+		return;
+	
+	HE_Face face	= args.Get().faces[0];
+	uint edgeCount	= 0;
+	
+	for (int i = 0; i < args.Get().patchCount; i++)
+	{
+		edgeCount += face.edgeCount;
+		if (dispatchThreadID < edgeCount)
+			break;
+		else
+			face = args.Get().faces[i + 1];
+	}
+	
+	const uint		faceEdgeID	= (dispatchThreadID - edgeCount) % face.edgeCount;
+	const uint32_t	vertexID	= face.vertexRange + ((faceEdgeID - face.vertexRange) % face.edgeCount) * 2 + 1;
+	const uint32_t	edgeID		= face.begin + dispatchThreadID % face.edgeCount;
+	
+		
+	points[0][vertexID].color	= edgeCount;
+	points[0][vertexID].UV		= (dispatchThreadID - edgeCount) % face.edgeCount;
+	
+	HalfEdge he		= inputCage[face.begin + faceEdgeID];
+	HalfEdge heNext = inputCage[he.next];
+	
+	if (!he.Border())
+	{
+		const uint32_t e0 = min(he.Twin(), edgeID);
+		const uint32_t e1 = max(he.Twin(), edgeID);
+		
+		const float3 fv0 = GetFacePoint(e0);
+		const float3 fv1 = GetFacePoint(e1);
+		const float3 ev0 = lerp(inputPoints[he.vert].xyz, inputPoints[heNext.vert].xyz, 0.5f);
+		
+		points[0][vertexID].color	= 6;
+		points[0][vertexID].xyz		= (fv0 + fv1) / 4.0f + ev0 / 2.0f;
+	}
+	else
+	{
+		const float3 p0 = inputPoints[he.vert].xyz;
+		const float3 p1 = inputPoints[heNext.vert].xyz;
+	
+		points[0][vertexID].xyz		= lerp(p0, p1, 0.5f);
+		points[0][vertexID].color	= 6;
+	}
+}
 
 
 /**********************************************************************
