@@ -181,9 +181,9 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		renderWindow->Handler.Subscribe(sub);
 
 #if _DEBUG
-		renderWindow->SetWindowTitle("HelloWorld-Debug");
+		renderWindow->SetWindowTitle("Hello Subdivion - Debug");
 #else
-		renderWindow->SetWindowTitle("HelloWorld");
+		renderWindow->SetWindowTitle("Hello Subdivion");
 #endif
 
 		constantBuffer	= renderSystem.CreateConstantBuffer(MEGABYTE, false);
@@ -195,10 +195,11 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			});
 
 #if 1
+		//ModifiableShape shape = LoadObjIntoShape(R"(assets\wolfgirl.obj)");
 		//ModifiableShape shape = LoadObjIntoShape(R"(assets\ferris.obj)");
-		//ModifiableShape shape = LoadObjIntoShape(R"(assets\marie.obj)");
-		ModifiableShape shape = LoadObjIntoShape(R"(assets\TestPlane.obj)");
-		//ModifiableShape shape = LoadObjIntoShape(R"(assets\imrod.obj)");
+		//ModifiableShape shape = LoadObjIntoShape(R"(assets\marie2.obj)");
+		//ModifiableShape shape = LoadObjIntoShape(R"(assets\TestPlane.obj)");
+		ModifiableShape shape = LoadObjIntoShape(R"(assets\imrod.obj)");
 #else
 		ModifiableShape shape{};
 		const uint32_t face0[] = {

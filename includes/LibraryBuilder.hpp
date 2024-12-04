@@ -115,8 +115,10 @@ namespace FlexKit
 			auto shaderLibrary = RenderSystem::_GetInstance().LoadShader(
 				nullptr, "lib_6_8", path.data(),
 				ShaderOptions{ 
+					.enable16BitTypes	= true,
 					.hlsl2021			= true, 
-					.loadRootSignature	= true });
+					.loadRootSignature	= true, 
+				});
 
 			D3D12_DXIL_LIBRARY_DESC* dxil_desc = &allocator->allocate<D3D12_DXIL_LIBRARY_DESC>();
 			dxil_desc->DXILLibrary.pShaderBytecode	= shaderLibrary.buffer;

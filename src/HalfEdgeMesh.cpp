@@ -42,13 +42,13 @@ namespace FlexKit
 
 		uint32_t edgeCount = 0;
 		uint32_t vertexCount = 0;
-		Vector<uint3> faces{ IN_allocator };
+		Vector<HE_Face> faces{ IN_allocator };
 		faces.reserve(shape.wFaces.size());
 
 		for (const auto&& [idx, face] : enumerate(shape.wFaces))
 		{ 
-			auto faceEdgeCount = (uint32_t)face.GetEdgeCount(shape);
-			faces.emplace_back(face.edgeStart, faceEdgeCount, vertexCount);
+			auto faceEdgeCount = (uint16_t)face.GetEdgeCount(shape);
+			faces.emplace_back(face.edgeStart, vertexCount, faceEdgeCount, (uint16_t)0);
 			edgeCount += faceEdgeCount;
 			vertexCount += 1 + 2 * faceEdgeCount;
 
@@ -193,8 +193,8 @@ namespace FlexKit
 					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
 					{
 						return FlexKit::PipelineBuilder{ allocator }.
-							AddMeshShader("MeshMain",	"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
-							AddPixelShader("PMain",		"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
+							AddMeshShader("MeshMain",	"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .enable16BitTypes = true, .hlsl2021 = true }).
+							AddPixelShader("PMain",		"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .enable16BitTypes = true, .hlsl2021 = true }).
 							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE}).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
@@ -209,8 +209,8 @@ namespace FlexKit
 					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
 					{
 						return FlexKit::PipelineBuilder{ allocator }.
-							AddMeshShader("WireMain",			"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
-							AddPixelShader("WhiteWireframe",	"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
+							AddMeshShader("WireMain",			"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .enable16BitTypes = true, .hlsl2021 = true }).
+							AddPixelShader("WhiteWireframe",	"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .enable16BitTypes = true, .hlsl2021 = true }).
 							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE }).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
@@ -481,6 +481,9 @@ namespace FlexKit
 	{
 		struct BuildLevels
 		{
+			FrameResourceHandle meshDrawInfo		= InvalidHandle;
+			FrameResourceHandle meshDrawFaces		= InvalidHandle;
+
 			FrameResourceHandle constantSpace		= InvalidHandle;
 
 			FrameResourceHandle backingSpace		= InvalidHandle;
@@ -518,6 +521,9 @@ namespace FlexKit
 				subDivData.faceLookup			= builder.NonPixelShaderResource(faceLookup);
 				subDivData.localRootSigSpace	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASCopyDest);
 				subDivData.constantSpace		= builder.AcquireVirtualResource(GPUResourceDesc::StructuredResource(1024), DASCopyDest);
+
+				subDivData.meshDrawInfo		= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASCopyDest);
+				subDivData.meshDrawFaces	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1 * MEGABYTE), DASCopyDest);
 			},
 			[this, camera](BuildLevels& subDivData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{

@@ -7,7 +7,6 @@
 
 namespace FlexKit
 {
-
 	struct HEEdge
 	{
 		uint32_t twin;
@@ -16,6 +15,18 @@ namespace FlexKit
 		uint32_t vert;
 	};
 
+	struct HE_Face
+	{
+		uint32_t begin;
+		uint32_t vertexRange;
+		uint16_t edgeCount;
+		uint16_t level;
+
+		uint32_t GetVertexCount()
+		{
+			return 1 + 2 * edgeCount;
+		}
+	};
 
 	struct HEVertex
 	{

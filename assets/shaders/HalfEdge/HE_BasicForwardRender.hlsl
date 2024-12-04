@@ -23,7 +23,7 @@ float4 ExtractRGBA8(uint rgba)
 
 StructuredBuffer<HalfEdge>	inputCage	: register(t0);
 StructuredBuffer<Vertex>	inputVerts	: register(t1);
-StructuredBuffer<uint3>		faces		: register(t2);
+StructuredBuffer<HE_Face>	faces		: register(t2);
 StructuredBuffer<uint>		faceLookup	: register(t3);
 
 struct VertexOut
@@ -122,8 +122,11 @@ void MeshMain(
 	
 	//SetMeshOutputCounts(128, 64);
 	
+	const uint patchID			= faceLookup[threadID];
+	const HE_Face face			= faces[patchID];
+	
 	TwinEdge edges[4];
-	GetTwinEdges(uint3(0, 4, 0), 0, edges, inputCage);
+	GetTwinEdges(face, 0, edges, inputCage);
 	
 	//TwinEdge he0 = twinEdges[4 * threadID + 0];
 	//TwinEdge he1 = twinEdges[4 * threadID + 1];
@@ -154,11 +157,11 @@ void WireMain(
 
 	const uint primitiveCount	= (groupID < patchCount / 32) ? 64 : 2 * (patchCount % 32);
 	const uint patchID			= faceLookup[threadID];
-	const uint3 face			= faces[patchID];
+	const HE_Face face			= faces[patchID];
 	SetMeshOutputCounts(128, primitiveCount);
 	
 	TwinEdge edges[4];
-	GetTwinEdges(face, threadID % face.y, edges, inputCage);
+	GetTwinEdges(face, threadID % face.edgeCount, edges, inputCage);
 		
 	const float4 v0 = mul(PV, float4(inputVerts[edges[0].vert].xyz, 1));
 	const float4 v1 = mul(PV, float4(inputVerts[edges[1].vert].xyz, 1));

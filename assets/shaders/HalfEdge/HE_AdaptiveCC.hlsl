@@ -8,7 +8,7 @@
 
 StructuredBuffer<HalfEdge>	inputCage	: register(t0);
 StructuredBuffer<Vertex>	inputPoints : register(t1);
-StructuredBuffer<uint3>		inputFaces	: register(t2);
+StructuredBuffer<HE_Face>	inputFaces	: register(t2);
 StructuredBuffer<uint>		faceLookup	: register(t3);
 
 RWStructuredBuffer<TwinEdge>	cages[]		: register(u0, space1);
@@ -103,7 +103,7 @@ void BuildBaseCage(
 	if(dispatchThreadID >= args.Get().patchCount)
 		return;
 
-	const uint3 face = inputFaces[dispatchThreadID];
+	const HE_Face face = inputFaces[dispatchThreadID];
 
 	float3 f = float3(0, 0, 0);
 #define CULL 0
@@ -130,9 +130,9 @@ void BuildBaseCage(
 	if(Intersects(frustum, aabb))
 #endif
 	
-	for(int i = 0; i < face.y; i++)
+	for(int i = 0; i < face.edgeCount; i++)
 	{	
-		const uint outputIdx = 4 * (face.x + i);
+		const uint outputIdx = 4 * (face.begin + i);
 		
 		TwinEdge edges[4];
 		GetTwinEdges(face, i, edges, inputCage);
@@ -214,6 +214,9 @@ float3 GetFacePoint(uint halfEdgeID)
 		const float3 xyz	= inputPoints[he.vert].xyz;
 		f += xyz;
 		n += 1.0f;
+		
+		if(n > 16)
+			return float3(100000000, 100000000, 100000000);
 	}
 	
 	return f / n;
@@ -235,11 +238,10 @@ void BuildEdges(
 		return;
 	
 	const uint faceIdx	= faceLookup[dispatchThreadID];
-	const uint3 face	= inputFaces[faceIdx];
+	const HE_Face face	= inputFaces[faceIdx];
 	
-	const uint32_t vertexID	= face.z + ((dispatchThreadID - face.z) % face.y) * 2 + 1;
-	const uint32_t edgeID	= face.x + dispatchThreadID % face.y;
-	
+	const uint32_t vertexID	= face.vertexRange + ((dispatchThreadID - face.vertexRange) % face.edgeCount) * 2 + 1;
+	const uint32_t edgeID	= face.begin + dispatchThreadID % face.edgeCount;
 	
 	HalfEdge he		= inputCage[edgeID];
 	HalfEdge heNext = inputCage[he.next];
@@ -278,14 +280,14 @@ void BuildVertices(
 		return;
 	
 	const uint faceIdx	= faceLookup[dispatchThreadID];
-	const uint3 face	= inputFaces[faceIdx];
+	const HE_Face face	= inputFaces[faceIdx];
 		
-	const uint32_t vertexID = face.z + ((dispatchThreadID - face.z) % face.y) * 2 + 0;
-	const uint32_t edgeID	= face.x + dispatchThreadID % face.y;
+	const uint32_t vertexID = face.vertexRange + ((dispatchThreadID - face.vertexRange) % face.edgeCount) * 2 + 0;
+	const uint32_t edgeID	= face.begin + dispatchThreadID % face.edgeCount;
 
 	HalfEdge he	= inputCage[edgeID];
 	if (he.IsT())
-	{
+	{		
 		uint32_t n				= 2; 
 		uint32_t prevSelection	= edgeID;
 		uint32_t selection		= RotateSelectionCCW(inputCage, edgeID);
@@ -298,8 +300,10 @@ void BuildVertices(
 			
 			if (n > 16)
 			{
-				prevSelection = BORDERVALUE;
-				break;
+				const float3 p0				= inputPoints[he.vert].xyz;
+				points[0][vertexID].xyz		= p0;
+				points[0][vertexID].color	= 1;
+				return;
 			}
 		}
 
@@ -315,8 +319,10 @@ void BuildVertices(
 		
 			if (n > 16)
 			{
-				prevSelection = BORDERVALUE;
-				break;
+				const float3 p0				= inputPoints[he.vert].xyz;
+				points[0][vertexID].xyz		= p0;
+				points[0][vertexID].color	= 1;
+				return;
 			}
 		}
 			
@@ -354,8 +360,9 @@ void BuildVertices(
 					
 			if(n >= 16)
 			{
-				selection = BORDERVALUE;
-				break;
+				points[0][vertexID].xyz		= p0;
+				points[0][vertexID].color	= 2;
+				return;
 			}
 		}
 		
@@ -382,11 +389,11 @@ void BuildFaces(RWDispatchNodeInputRecord<BuildFacesArgs>	args,
 	if (dispatchThreadID >= patchCount)
 		return;
 	
-	const uint3 range = inputFaces[dispatchThreadID];
-	
-	const uint vertexCount	= 1 + 2 * range.y;
-	points[0][range.z + vertexCount - 1].xyz	= GetFacePoint(range.x);
-	points[0][range.z + vertexCount - 1].color	= 6;
+	const HE_Face	face		= inputFaces[dispatchThreadID];
+	const uint		vertexCount	= face.GetVertexCount();
+
+	points[0][face.vertexRange + vertexCount - 1].xyz	= GetFacePoint(face.begin);
+	points[0][face.vertexRange + vertexCount - 1].color	= 6;
 
 	uint idx = 0;
 	InterlockedAdd(args.Get().remaining, -1, idx);	
