@@ -43,8 +43,9 @@ namespace FlexKit
 		~HalfEdgeMesh();
 
 
+		void InitializeMesh(FlexKit::FrameGraph& frameGraph);
 		void BuildSubDivLevel(FlexKit::FrameGraph& frameGraph);
-		void BuildAllSubDivLevel(FlexKit::FrameGraph& frameGraph);
+		void AdaptiveSubdivUpdate(FlexKit::FrameGraph& frameGraph, FlexKit::CameraHandle camera);
 
 		
 		/************************************************************************************************/
@@ -71,6 +72,7 @@ namespace FlexKit
 		ResourceHandle		controlFaces		= InvalidHandle;
 		ResourceHandle		controlCage			= InvalidHandle;
 		ResourceHandle		controlPoints		= InvalidHandle;
+		ResourceHandle		faceLookup			= InvalidHandle;
 		ResourceHandle		levels[3]			= { InvalidHandle, InvalidHandle, InvalidHandle };
 		ResourceHandle		points[3]			= { InvalidHandle, InvalidHandle, InvalidHandle };
 		uint32_t			edgeCount[3]		= { 0, 0, 0 };

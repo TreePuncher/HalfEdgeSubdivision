@@ -195,7 +195,10 @@ struct CBTTerrainState : FlexKit::FrameworkState
 			});
 
 #if 1
-		ModifiableShape shape = LoadObjIntoShape(R"(assets\blossom.obj)");
+		//ModifiableShape shape = LoadObjIntoShape(R"(assets\ferris.obj)");
+		ModifiableShape shape = LoadObjIntoShape(R"(assets\marie.obj)");
+		//ModifiableShape shape = LoadObjIntoShape(R"(assets\TestPlane.obj)");
+		//ModifiableShape shape = LoadObjIntoShape(R"(assets\imrod.obj)");
 #else
 		ModifiableShape shape{};
 		const uint32_t face0[] = {
@@ -249,7 +252,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		runOnce.push_back(
 			[&](FlexKit::FrameGraph& frameGraph) 
 			{
-				HEMesh->BuildAllSubDivLevel(frameGraph);
+				HEMesh->InitializeMesh(frameGraph);
 			});
 
 		auto& cameraNode	= camera.AddView<SceneNodeView>();
@@ -258,7 +261,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		shape.Build();
 
 		orbitCamera.acceleration = 10.0f;
-		orbitCamera.TranslateWorld({  0.0f, shape.GetAABB().MidPoint().y, 5.0f });
+		orbitCamera.TranslateWorld({  0.0f, shape.GetAABB().MidPoint().y, 7.5f });
 		orbitCamera.SetCameraFOV(0.523599);
 		orbitCamera.SetCameraAspectRatio(1920.0f / 1080.0f);
 
@@ -374,7 +377,9 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		if (HEMesh && activeCamera != FlexKit::InvalidHandle)
 		{
-			//HEMesh->BuildAllSubDivLevel(frameGraph);
+			if(updateAdaptiveLOD)
+				HEMesh->AdaptiveSubdivUpdate(frameGraph, activeCamera);
+			
 			HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer(), depthBuffer.Get(), adaptiveLODlevel);
 		}
 
@@ -429,6 +434,13 @@ struct CBTTerrainState : FlexKit::FrameworkState
 					return true;
 				}
 				break;
+			case FlexKit::KC_L:
+				if (evt.Action == FlexKit::Event::Release)
+				{
+					updateAdaptiveLOD = !updateAdaptiveLOD;
+					return true;
+				}
+				break;
 			case FlexKit::KC_W:
 			case FlexKit::KC_A:
 			case FlexKit::KC_S:
@@ -473,7 +485,8 @@ struct CBTTerrainState : FlexKit::FrameworkState
 	FlexKit::GameObject			gameObjects[512];
 	FlexKit::GameObject			camera;
 
-	uint32_t adaptiveLODlevel	= 0;
+	uint32_t	adaptiveLODlevel	= 0;
+	bool		updateAdaptiveLOD	= true;
 };
 
 
@@ -485,9 +498,11 @@ int main(int argc, const char* argv[])
 	auto memory = FlexKit::CreateEngineMemory();
 	FlexKit::FKApplication app{ memory, 
 		FlexKit::CoreOptions{ 
+#if _DEBUG
 			.GPUdebugMode	= true,
 			.GPUValidation	= true,
 			.GPUSyncQueues	= true,
+#endif
 	} };
 
 	app.PushState<CBTTerrainState>();

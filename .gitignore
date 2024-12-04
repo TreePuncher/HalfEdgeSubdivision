@@ -3,3 +3,4 @@ out/*
 assetPacks/*
 Modules/*
 generated_headers/*
+*.obj

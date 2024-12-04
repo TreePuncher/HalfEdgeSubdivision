@@ -14,19 +14,24 @@ namespace FlexKit
 					iAllocator&			IN_temp) : 
 			cbt		{ IN_renderSystem, IN_allocator } 
 	{
-		Vector<HEEdge> halfEdges{ IN_allocator };
+		Vector<HEEdge>		halfEdges{ IN_allocator };
+		Vector<uint>		faceLookupBuffer{ IN_allocator };
 
 		halfEdges.reserve(shape.wEdges.size());
 		for (const auto&& [idx, edge] : std::views::enumerate(shape.wEdges))
 		{
-			auto t			= shape.IsEdgeVertex(edge.vertices[0]);
-			bool c			= shape.GetVertexValence(edge.vertices[0]) == 2;
-			bool isOnEdge	= shape.IsEdgeVertex(edge.vertices[0]);
-			
+			const bool isOnEdge	= shape.IsEdgeVertex(edge.vertices[0]);
+
+			auto CalculateTwinValue = [&]() -> uint32_t
+			{
+				return	(edge.twin & (0xffffffff >> 2)) |
+						(shape.GetVertexValence(edge.vertices[0]) == 2 ? (1 << 31) : 0) |
+						(isOnEdge ? (1 << 30) : 0);
+			};
+
 			HEEdge hEdge
 			{
-				//.twin = shape.GetVertexValence(edge.vertices[0]) == 2 ? ((edge.twin & (0xffffffff >> 1)) | (1 << 31)) : (edge.twin & (0xffffffff >> 1)),
-				.twin = isOnEdge ? ((edge.twin & (0xffffffff >> 1)) | (1 << 31)) : (edge.twin & (0xffffffff >> 1)),
+				.twin = CalculateTwinValue(),
 				.next = edge.next,
 				.prev = edge.prev,
 				.vert = edge.vertices[0],
@@ -37,14 +42,18 @@ namespace FlexKit
 
 		uint32_t edgeCount = 0;
 		uint32_t vertexCount = 0;
-		Vector<FlexKit::uint2> faces{ IN_allocator };
+		Vector<uint3> faces{ IN_allocator };
 		faces.reserve(shape.wFaces.size());
-		for (const auto& face : shape.wFaces)
+
+		for (const auto&& [idx, face] : enumerate(shape.wFaces))
 		{ 
 			auto faceEdgeCount = (uint32_t)face.GetEdgeCount(shape);
-			faces.emplace_back(face.edgeStart, faceEdgeCount);
+			faces.emplace_back(face.edgeStart, faceEdgeCount, vertexCount);
 			edgeCount += faceEdgeCount;
 			vertexCount += 1 + 2 * faceEdgeCount;
+
+			for (int i = 0; i < faceEdgeCount; i++)
+				faceLookupBuffer.emplace_back((uint32_t)idx);
 		}
 		
 		std::cout << "Half edge count: " << edgeCount << "\n";
@@ -52,7 +61,6 @@ namespace FlexKit
 		std::cout << "L1 Half edge count: " << edgeCount * 16 << "\n";
 		std::cout << "L2 Half edge count: " << edgeCount * 64 << "\n";
 		std::cout << "Vertex count: " << vertexCount << "\n";
-
 
 		Vector<HalfEdgeVertex> meshPoints{ IN_allocator };
 		meshPoints.resize(shape.wVertices.size());
@@ -68,6 +76,8 @@ namespace FlexKit
 		controlFaces		= IN_renderSystem.CreateGPUResource(GPUResourceDesc::StructuredResource(faces.ByteSize()));
 		controlCage			= IN_renderSystem.CreateGPUResource(GPUResourceDesc::StructuredResource(halfEdges.ByteSize()));
 		controlPoints		= IN_renderSystem.CreateGPUResource(GPUResourceDesc::StructuredResource(meshPoints.ByteSize()));
+		faceLookup			= IN_renderSystem.CreateGPUResource(GPUResourceDesc::StructuredResource(faceLookupBuffer.ByteSize()));
+
 		controlCageSize		= halfEdges.size();
 		controlCageFaces	= faces.size();
 		const uint32_t level0PointCount = (shape.wFaces.size() + shape.wEdges.size()) * 2;
@@ -112,8 +122,14 @@ namespace FlexKit
 				uploadQueue,
 				faces.data(),
 				faces.ByteSize(), 1, FlexKit::DASNonPixelShaderResource);
+		
+		IN_renderSystem.UpdateResourceByUploadQueue(
+				IN_renderSystem.GetDeviceResource(faceLookup),
+				uploadQueue,
+				faceLookupBuffer.data(),
+				faceLookupBuffer.ByteSize(), 1, FlexKit::DASNonPixelShaderResource);
 
-		cbt.Initialize({ 512 });
+		cbt.Initialize({ .maxDepth = 14 });
 
 		static bool registerStates = 
 			[&]
@@ -124,23 +140,26 @@ namespace FlexKit
 				heap1.SetParameterAsShaderUAV(0, 0, -1, 2);
 
 				RootSignatureBuilder builder{ IN_allocator };
-				builder.SetParameterAsUINT(0, 1, 0, 0);
+				builder.SetParameterAsUINT(0, 18, 0, 0);
 				builder.SetParameterAsSRV(1, 0, 0);
 				builder.SetParameterAsSRV(2, 1, 0);
 				builder.SetParameterAsSRV(3, 2, 0);
 				builder.SetParameterAsDescriptorTable(4, heap0);
 				builder.SetParameterAsDescriptorTable(5, heap1);
+				builder.SetParameterAsCBV(6, 1);
+				builder.SetParameterAsSRV(7, 3);
 				globalRoot = builder.Build(IN_renderSystem, IN_temp);
 
 				updateState = LibraryBuilder{ IN_temp }.
-					LoadShaderLibrary("assets\\shaders\\HalfEdge\\HL_WorkGraph.hlsl").
+					LoadShaderLibrary("assets\\shaders\\HalfEdge\\HE_AdaptiveCC.hlsl").
+					//LoadShaderLibrary("assets\\shaders\\HalfEdge\\HE_CatmullClark.hlsl").
 					AddGlobalRootSignature(*globalRoot).
 					AddWorkGroup("HE_Builder", {}).
 					BuildStateObject();
 
 				programID		= updateState->GetProgramID("HE_Builder");
-				initiate		= updateState->GetEntryPointIndex("InitiateBuild");
-				subdivide		= updateState->GetEntryPointIndex("InitiateSubdivision");
+				initiate		= updateState->GetEntryPointIndex("InitiateHalfEdgeMesh");
+				subdivide		= updateState->GetEntryPointIndex("SubdivideHalfEdgeMesh");
 
 				IN_renderSystem.RegisterPSOLoader(
 					BuildBisectors,
@@ -174,9 +193,9 @@ namespace FlexKit
 					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
 					{
 						return FlexKit::PipelineBuilder{ allocator }.
-							AddMeshShader("MeshMain",	"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
-							AddPixelShader("PMain",		"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
-							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::BACK }).
+							AddMeshShader("MeshMain",	"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
+							AddPixelShader("PMain",		"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
+							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE}).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
 									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).
@@ -190,9 +209,9 @@ namespace FlexKit
 					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
 					{
 						return FlexKit::PipelineBuilder{ allocator }.
-							AddMeshShader("WireMain",			"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
-							AddPixelShader("WhiteWireframe",	"assets\\shaders\\HalfEdge\\DebugVIS.hlsl", { .hlsl2021 = true }).
-							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::FRONT }).
+							AddMeshShader("WireMain",			"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
+							AddPixelShader("WhiteWireframe",	"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
+							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::BACK }).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
 									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).
@@ -337,10 +356,12 @@ namespace FlexKit
 	/************************************************************************************************/
 
 
-	void HalfEdgeMesh::BuildAllSubDivLevel(FlexKit::FrameGraph& frameGraph)
+	void HalfEdgeMesh::InitializeMesh(FlexKit::FrameGraph& frameGraph)
 	{
 		struct BuildLevels
 		{
+			FrameResourceHandle constantSpace		= InvalidHandle;
+
 			FrameResourceHandle backingSpace		= InvalidHandle;
 			FrameResourceHandle localRootSigSpace	= InvalidHandle;
 
@@ -348,11 +369,14 @@ namespace FlexKit
 			FrameResourceHandle inputPoints	= InvalidHandle;
 			FrameResourceHandle InputFaces	= InvalidHandle;
 
+			FrameResourceHandle faceLookup	= InvalidHandle;
 			FrameResourceHandle outputCages[3];
 			FrameResourceHandle outputVerts[3];
 
 			uint patchCount = 0;
 		};
+
+		levelsBuilt++;
 
 		frameGraph.AddNode<BuildLevels>(
 			{},
@@ -375,12 +399,12 @@ namespace FlexKit
 				if (auto spaceRequired = updateState->GetBackingMemory(); spaceRequired)
 					subDivData.backingSpace = builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(spaceRequired), DASUAV);
 
-				subDivData.localRootSigSpace = builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASCopyDest);
-				levelsBuilt++;
+				subDivData.localRootSigSpace	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASCopyDest);
+				subDivData.constantSpace		= builder.AcquireVirtualResource(GPUResourceDesc::StructuredResource(1024), DASCopyDest);
 			},
 			[this](BuildLevels& subDivData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
-				ctx.BeginEvent_DEBUG("Create Subdivision Levels");
+				ctx.BeginEvent_DEBUG("Initialize Half Edge Mesh");
 
 				resources.SetDebugName(subDivData.localRootSigSpace, "localRootSigSpace");
 
@@ -395,15 +419,145 @@ namespace FlexKit
 				setProgram.WorkGraph.Flags							= D3D12_SET_WORK_GRAPH_FLAG_INITIALIZE;
 				setProgram.Type										= D3D12_PROGRAM_TYPE_WORK_GRAPH;
 				
+				ctx.FlushBarriers();
 
 				ctx.SetComputeRootSignature(globalRoot);
-				ctx.SetComputeConstantValue(0, 1, &subDivData.patchCount);
 				ctx.SetComputeShaderResourceView(1, resources.GetResource(subDivData.inputCage));
 				ctx.SetComputeShaderResourceView(2, resources.GetResource(subDivData.inputPoints));
 				ctx.SetComputeShaderResourceView(3, resources.GetResource(subDivData.InputFaces));
+				ctx.SetComputeConstantBufferView(6, resources.NonPixelShaderResource(subDivData.constantSpace, ctx, Sync_Copy, Sync_Compute));
 
-				FlexKit::DescriptorHeap cages;
-				FlexKit::DescriptorHeap points;
+				DescriptorHeap cages;
+				DescriptorHeap points;
+				cages.Init2(ctx, globalRoot->GetDescHeap(0), 3, threadLocalAllocator);
+				points.Init2(ctx, globalRoot->GetDescHeap(1), 3, threadLocalAllocator);
+
+				for(auto&& [idx, cage] : enumerate(subDivData.outputCages))
+					cages.SetUAVStructured(ctx, idx, resources.GetResource(cage), 16);
+	
+				for (auto&& [idx, p] : enumerate(subDivData.outputVerts))
+					points.SetUAVStructured(ctx, idx, resources.GetResource(p), sizeof(HalfEdgeVertex));
+
+				ctx.SetComputeDescriptorTable(4, cages);	// cages
+				ctx.SetComputeDescriptorTable(5, points);	// points
+
+				ctx.DeviceContext->SetProgram(&setProgram);
+
+				struct
+				{
+					const uint4		xyzw;
+				}	arguments{
+					.xyzw	= { 1, 1, 1, subDivData.patchCount },
+				};
+
+				ctx.FlushBarriers();
+
+				D3D12_DISPATCH_GRAPH_DESC dispatch;
+				dispatch.Mode = D3D12_DISPATCH_MODE::D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
+				dispatch.NodeCPUInput.EntrypointIndex		= initiate;
+				dispatch.NodeCPUInput.NumRecords			= 1;
+				dispatch.NodeCPUInput.pRecords				= &arguments;
+				dispatch.NodeCPUInput.RecordStrideInBytes	= sizeof(arguments);
+				ctx.DeviceContext->DispatchGraph(&dispatch);
+				
+				for (auto&& [idx, cage] : enumerate(subDivData.outputCages))
+					ctx.AddUAVBarrier(resources.GetResource(cage));
+
+				for (auto&& [idx, verts] : enumerate(subDivData.outputVerts))
+					ctx.AddUAVBarrier(resources.GetResource(verts));
+
+				ctx.EndEvent_DEBUG();
+			}
+		);
+	}
+
+
+	/************************************************************************************************/
+
+
+	void HalfEdgeMesh::AdaptiveSubdivUpdate(FlexKit::FrameGraph& frameGraph, FlexKit::CameraHandle camera)
+	{
+		struct BuildLevels
+		{
+			FrameResourceHandle constantSpace		= InvalidHandle;
+
+			FrameResourceHandle backingSpace		= InvalidHandle;
+			FrameResourceHandle localRootSigSpace	= InvalidHandle;
+
+			FrameResourceHandle inputCage	= InvalidHandle;
+			FrameResourceHandle inputPoints	= InvalidHandle;
+			FrameResourceHandle InputFaces	= InvalidHandle;
+			FrameResourceHandle faceLookup	= InvalidHandle;
+
+			FrameResourceHandle outputCages[3];
+			FrameResourceHandle outputVerts[3];
+		};
+
+		frameGraph.AddNode<BuildLevels>(
+			{},
+			[&](FrameGraphNodeBuilder& builder, BuildLevels& subDivData)
+			{
+				subDivData.inputCage	= builder.NonPixelShaderResource(controlCage);
+				subDivData.inputPoints	= builder.NonPixelShaderResource(controlPoints);
+				subDivData.InputFaces	= builder.NonPixelShaderResource(controlFaces);
+
+				for(uint32_t i = 0; i < 3; i++)
+				{
+					frameGraph.AddOutput(levels[i]);
+					frameGraph.AddOutput(points[i]);
+
+					subDivData.outputCages[i] = builder.UnorderedAccess(levels[i]);
+					subDivData.outputVerts[i] = builder.UnorderedAccess(points[i]);
+				}
+
+				if (auto spaceRequired = updateState->GetBackingMemory(); spaceRequired)
+					subDivData.backingSpace = builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(spaceRequired), DASUAV);
+
+				subDivData.faceLookup			= builder.NonPixelShaderResource(faceLookup);
+				subDivData.localRootSigSpace	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASCopyDest);
+				subDivData.constantSpace		= builder.AcquireVirtualResource(GPUResourceDesc::StructuredResource(1024), DASCopyDest);
+			},
+			[this, camera](BuildLevels& subDivData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
+			{
+				ctx.BeginEvent_DEBUG("Update Subdivision Levels");
+
+				resources.SetDebugName(subDivData.localRootSigSpace, "localRootSigSpace");
+
+				auto space = resources.GetDevicePointerRange(subDivData.backingSpace);
+
+				D3D12_SET_PROGRAM_DESC setProgram;
+				setProgram.WorkGraph.BackingMemory					= resources.GetDevicePointerRange(subDivData.backingSpace);
+				setProgram.WorkGraph.ProgramIdentifier				= programID;
+				setProgram.WorkGraph.NodeLocalRootArgumentsTable	= {	.StartAddress	= 0, 
+																		.SizeInBytes	= 0, 
+																		.StrideInBytes	= 0 };
+				setProgram.WorkGraph.Flags							= D3D12_SET_WORK_GRAPH_FLAG_INITIALIZE;
+				setProgram.Type										= D3D12_PROGRAM_TYPE_WORK_GRAPH;
+				
+				const auto constants = GetCameraConstants(camera);
+				
+				const auto f = GetFrustumVS(camera);
+
+				UploadReservation upload = ctx.ReserveDirectUploadSpace(sizeof(f));
+				memcpy(upload.buffer, &f, sizeof(f));
+
+				ctx.ReserveDirectUploadSpace(upload);
+				ctx.CopyBuffer(upload, resources.GetResource(subDivData.constantSpace));
+
+				ctx.FlushBarriers();
+
+				ctx.SetComputeRootSignature(globalRoot);
+				ctx.SetComputeConstantValue(0, 16, &constants.View);
+				ctx.SetComputeConstantValue(0, 1, &patchCount[0], 16);
+				ctx.SetComputeConstantValue(0, 1, &controlCageFaces, 17);
+				ctx.SetComputeShaderResourceView(1, resources.GetResource(subDivData.inputCage));
+				ctx.SetComputeShaderResourceView(2, resources.GetResource(subDivData.inputPoints));
+				ctx.SetComputeShaderResourceView(3, resources.GetResource(subDivData.InputFaces));
+				ctx.SetComputeConstantBufferView(6, resources.NonPixelShaderResource(subDivData.constantSpace, ctx, Sync_Copy, Sync_Compute));
+				ctx.SetComputeShaderResourceView(7, resources.GetResource(subDivData.faceLookup));
+
+				DescriptorHeap cages;
+				DescriptorHeap points;
 				cages.Init2(ctx, globalRoot->GetDescHeap(0), 3, threadLocalAllocator);
 				points.Init2(ctx, globalRoot->GetDescHeap(1), 3, threadLocalAllocator);
 
@@ -418,14 +572,32 @@ namespace FlexKit
 
 				ctx.DeviceContext->SetProgram(&setProgram);
 
-				uint4 xyzw{ 1, 1, 1, subDivData.patchCount };
+				const uint dispatchX = 1;// patchCount[0] / 1024 + (patchCount[0] % 1024 == 0 ? 0 : 1);
+				
+				struct
+				{
+					uint patchCount;
+					uint halfEdgeCount;
+				}	const arguments{
+					.patchCount		= controlCageFaces,
+					.halfEdgeCount	= patchCount[0]
+				};
+
+				ctx.FlushBarriers();
+
 				D3D12_DISPATCH_GRAPH_DESC dispatch;
 				dispatch.Mode = D3D12_DISPATCH_MODE::D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
 				dispatch.NodeCPUInput.EntrypointIndex		= subdivide;
 				dispatch.NodeCPUInput.NumRecords			= 1;
-				dispatch.NodeCPUInput.pRecords				= &xyzw;
-				dispatch.NodeCPUInput.RecordStrideInBytes	= 0;
+				dispatch.NodeCPUInput.pRecords				= &arguments;
+				dispatch.NodeCPUInput.RecordStrideInBytes	= sizeof(arguments);
 				ctx.DeviceContext->DispatchGraph(&dispatch);
+				
+				for (auto&& [idx, cage] : enumerate(subDivData.outputCages))
+					ctx.AddUAVBarrier(resources.GetResource(cage));
+
+				for (auto&& [idx, verts] : enumerate(subDivData.outputVerts))
+					ctx.AddUAVBarrier(resources.GetResource(verts));
 
 				ctx.EndEvent_DEBUG();
 			}
@@ -464,11 +636,12 @@ namespace FlexKit
 			[this, camera, targetLevel](DrawLevel& visData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
 				ctx.BeginEvent_DEBUG("Draw HE Mesh");
-				
+				ctx.FlushBarriers();
+
 				RenderTargetList renderTargets = { resources.RenderTarget(visData.renderTarget, ctx) };
 				ctx.SetGraphicsPipelineState(RenderWireframe, threadLocalAllocator);
-				ctx.SetGraphicsShaderResourceView(0, resources.NonPixelShaderResource(visData.inputCage, ctx, Sync_Compute, Sync_Compute));
-				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(visData.inputVerts, ctx, Sync_Compute, Sync_Compute));
+				ctx.SetGraphicsShaderResourceView(0, resources.NonPixelShaderResource(visData.inputCage, ctx, Sync_Compute, Sync_All));
+				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(visData.inputVerts, ctx, Sync_Compute, Sync_All));
 
 				struct {
 					float4x4_GPU	PV;

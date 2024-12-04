@@ -205,7 +205,7 @@ float4 WhiteWireframe(Vertex2Out IN) : SV_Target
 	const float d = min(IN.d[0], min(IN.d[1], IN.d[2])) / 2.0f;
 	const float I = exp2(-2 * d * d);
 	
-	return	float4(0, 0, 0, 1) * I + 
+	return	float4(0.01f, 0.01f, 0.01f, 1) * I + 
 			IN.color * (1.0 - I);
 }
 
