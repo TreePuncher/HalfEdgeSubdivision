@@ -211,7 +211,7 @@ namespace FlexKit
 						return FlexKit::PipelineBuilder{ allocator }.
 							AddMeshShader("WireMain",			"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
 							AddPixelShader("WhiteWireframe",	"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .hlsl2021 = true }).
-							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::BACK }).
+							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE }).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
 									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).
@@ -367,9 +367,9 @@ namespace FlexKit
 
 			FrameResourceHandle inputCage	= InvalidHandle;
 			FrameResourceHandle inputPoints	= InvalidHandle;
-			FrameResourceHandle InputFaces	= InvalidHandle;
-
+			FrameResourceHandle inputFaces	= InvalidHandle;
 			FrameResourceHandle faceLookup	= InvalidHandle;
+
 			FrameResourceHandle outputCages[3];
 			FrameResourceHandle outputVerts[3];
 
@@ -384,7 +384,7 @@ namespace FlexKit
 			{
 				subDivData.inputCage	= builder.NonPixelShaderResource(controlCage);
 				subDivData.inputPoints	= builder.NonPixelShaderResource(controlPoints);
-				subDivData.InputFaces	= builder.NonPixelShaderResource(controlFaces);
+				subDivData.inputFaces	= builder.NonPixelShaderResource(controlFaces);
 				subDivData.patchCount	= controlCageFaces;
 
 				for(uint32_t i = 0; i < 3; i++)
@@ -399,6 +399,7 @@ namespace FlexKit
 				if (auto spaceRequired = updateState->GetBackingMemory(); spaceRequired)
 					subDivData.backingSpace = builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(spaceRequired), DASUAV);
 
+				subDivData.faceLookup			= builder.NonPixelShaderResource(faceLookup);
 				subDivData.localRootSigSpace	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASCopyDest);
 				subDivData.constantSpace		= builder.AcquireVirtualResource(GPUResourceDesc::StructuredResource(1024), DASCopyDest);
 			},
@@ -424,8 +425,9 @@ namespace FlexKit
 				ctx.SetComputeRootSignature(globalRoot);
 				ctx.SetComputeShaderResourceView(1, resources.GetResource(subDivData.inputCage));
 				ctx.SetComputeShaderResourceView(2, resources.GetResource(subDivData.inputPoints));
-				ctx.SetComputeShaderResourceView(3, resources.GetResource(subDivData.InputFaces));
+				ctx.SetComputeShaderResourceView(3, resources.GetResource(subDivData.inputFaces));
 				ctx.SetComputeConstantBufferView(6, resources.NonPixelShaderResource(subDivData.constantSpace, ctx, Sync_Copy, Sync_Compute));
+				ctx.SetComputeShaderResourceView(7, resources.GetResource(subDivData.faceLookup));
 
 				DescriptorHeap cages;
 				DescriptorHeap points;
@@ -619,6 +621,8 @@ namespace FlexKit
 			FrameResourceHandle depthTarget;
 			FrameResourceHandle inputCage;
 			FrameResourceHandle inputVerts;
+			FrameResourceHandle inputFaces;
+			FrameResourceHandle faceLookup;
 		};
 
 		frameGraph.AddNode<DrawLevel>(
@@ -630,8 +634,10 @@ namespace FlexKit
 
 				visData.renderTarget	= builder.RenderTarget(renderTarget);
 				visData.depthTarget		= builder.DepthTarget(depthTarget);
-				visData.inputCage		= builder.NonPixelShaderResource(levels[targetLevel]);
+				visData.inputCage		= builder.NonPixelShaderResource(controlCage);
 				visData.inputVerts		= builder.NonPixelShaderResource(points[targetLevel]);
+				visData.faceLookup		= builder.NonPixelShaderResource(faceLookup);
+				visData.inputFaces		= builder.NonPixelShaderResource(controlFaces);
 			},
 			[this, camera, targetLevel](DrawLevel& visData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
@@ -642,6 +648,10 @@ namespace FlexKit
 				ctx.SetGraphicsPipelineState(RenderWireframe, threadLocalAllocator);
 				ctx.SetGraphicsShaderResourceView(0, resources.NonPixelShaderResource(visData.inputCage, ctx, Sync_Compute, Sync_All));
 				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(visData.inputVerts, ctx, Sync_Compute, Sync_All));
+				ctx.SetGraphicsShaderResourceView(2, resources.NonPixelShaderResource(visData.inputFaces, ctx, Sync_Compute, Sync_All));
+				ctx.SetGraphicsShaderResourceView(3, resources.NonPixelShaderResource(visData.faceLookup, ctx, Sync_Compute, Sync_All));
+				//ctx.SetGraphicsShaderResourceView(3, resources.GetResource(visData.faceLookup));
+
 
 				struct {
 					float4x4_GPU	PV;
@@ -651,7 +661,7 @@ namespace FlexKit
 						.patchCount = patchCount[targetLevel]
 				};
 
-				ctx.SetGraphicsConstantValue(2, 17, &constants);
+				ctx.SetGraphicsConstantValue(4, 17, &constants);
 				ctx.SetScissorAndViewports(renderTargets);
 				ctx.SetRenderTargets(renderTargets, true, resources.GetResource(visData.depthTarget));
 				ctx.DispatchMesh({ patchCount[targetLevel] / 32 + (patchCount[targetLevel] % 32 == 0 ? 0 : 1), 1, 1 });

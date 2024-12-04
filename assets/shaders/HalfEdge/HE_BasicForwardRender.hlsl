@@ -1,5 +1,9 @@
+#include "HE_Common.hlsl"
+
 #define RootSig		"SRV(t0)," \
 					"SRV(t1)," \
+					"SRV(t2)," \
+					"SRV(t3)," \
 					"RootConstants(num32BitConstants = 17, b0)"
 
 cbuffer constants : register(b0)
@@ -7,29 +11,6 @@ cbuffer constants : register(b0)
 	float4x4	PV;
 	uint		patchCount;
 };
-
-struct TwinEdge
-{
-	 int32_t twin;
-	uint32_t vert;
-};
-
-struct Vertex
-{
-	float3	xyz;
-	uint	color;
-	float2  UV;
-};
-
-Vertex MakeVertex(float3 xyz, uint color = 0, float2 UV = float2(0, 0))
-{
-	Vertex v;
-	v.xyz	= xyz;
-	v.color	= color;
-	v.UV	= UV;
-	
-	return v;
-}
 
 float4 ExtractRGBA8(uint rgba)
 {
@@ -40,8 +21,10 @@ float4 ExtractRGBA8(uint rgba)
 		float((rgba >>  0) & 0xff) / float(0xff));
 }
 
-StructuredBuffer<TwinEdge>	twinEdges	: register(t0);
+StructuredBuffer<HalfEdge>	inputCage	: register(t0);
 StructuredBuffer<Vertex>	inputVerts	: register(t1);
+StructuredBuffer<uint3>		faces		: register(t2);
+StructuredBuffer<uint>		faceLookup	: register(t3);
 
 struct VertexOut
 {
@@ -132,20 +115,25 @@ void MeshMain(
 	out indices		uint3		tris[64],
 	out vertices	VertexOut	verts[128])
 {
+	SetMeshOutputCounts(0, 0);
+	
 	if (threadID >= patchCount)
 		return;
 	
-	SetMeshOutputCounts(128, 64);
+	//SetMeshOutputCounts(128, 64);
 	
-	TwinEdge he0 = twinEdges[4 * threadID + 0];
-	TwinEdge he1 = twinEdges[4 * threadID + 1];
-	TwinEdge he2 = twinEdges[4 * threadID + 2];
-	TwinEdge he3 = twinEdges[4 * threadID + 3];
-		
-	verts[4 * (threadID % 32) + 0] = MakeVert(inputVerts[he0.vert], threadID);
-	verts[4 * (threadID % 32) + 1] = MakeVert(inputVerts[he1.vert], threadID);
-	verts[4 * (threadID % 32) + 2] = MakeVert(inputVerts[he2.vert], threadID);
-	verts[4 * (threadID % 32) + 3] = MakeVert(inputVerts[he3.vert], threadID);
+	TwinEdge edges[4];
+	GetTwinEdges(uint3(0, 4, 0), 0, edges, inputCage);
+	
+	//TwinEdge he0 = twinEdges[4 * threadID + 0];
+	//TwinEdge he1 = twinEdges[4 * threadID + 1];
+	//TwinEdge he2 = twinEdges[4 * threadID + 2];
+	//TwinEdge he3 = twinEdges[4 * threadID + 3];
+	//	
+	verts[4 * (threadID % 32) + 0] = MakeVert(inputVerts[edges[0].vert], threadID);
+	verts[4 * (threadID % 32) + 1] = MakeVert(inputVerts[edges[1].vert], threadID);
+	verts[4 * (threadID % 32) + 2] = MakeVert(inputVerts[edges[2].vert], threadID);
+	verts[4 * (threadID % 32) + 3] = MakeVert(inputVerts[edges[3].vert], threadID);
 		
 	tris[2 * (threadID % 32) + 0] = uint3(4 * (threadID % 32) + 0, 4 * (threadID % 32) + 1, 4 * (threadID % 32) + 2);
 	tris[2 * (threadID % 32) + 1] = uint3(4 * (threadID % 32) + 0, 4 * (threadID % 32) + 2, 4 * (threadID % 32) + 3);	
@@ -163,33 +151,32 @@ void WireMain(
 {
 	if (threadID >= patchCount)
 		return;
-	
-	const uint primitiveCount = (groupID < patchCount / 32) ? 64 : 2 * (patchCount % 32);
-	
+
+	const uint primitiveCount	= (groupID < patchCount / 32) ? 64 : 2 * (patchCount % 32);
+	const uint patchID			= faceLookup[threadID];
+	const uint3 face			= faces[patchID];
 	SetMeshOutputCounts(128, primitiveCount);
 	
-	TwinEdge he0 = twinEdges[4 * threadID + 0];
-	TwinEdge he1 = twinEdges[4 * threadID + 1];
-	TwinEdge he2 = twinEdges[4 * threadID + 2];
-	TwinEdge he3 = twinEdges[4 * threadID + 3];
+	TwinEdge edges[4];
+	GetTwinEdges(face, threadID % face.y, edges, inputCage);
 		
-	const float4 v0 = mul(PV, float4(inputVerts[he0.vert].xyz, 1));
-	const float4 v1 = mul(PV, float4(inputVerts[he1.vert].xyz, 1));
-	const float4 v2 = mul(PV, float4(inputVerts[he2.vert].xyz, 1));
-	const float4 v3 = mul(PV, float4(inputVerts[he3.vert].xyz, 1));
+	const float4 v0 = mul(PV, float4(inputVerts[edges[0].vert].xyz, 1));
+	const float4 v1 = mul(PV, float4(inputVerts[edges[1].vert].xyz, 1));
+	const float4 v2 = mul(PV, float4(inputVerts[edges[2].vert].xyz, 1));
+	const float4 v3 = mul(PV, float4(inputVerts[edges[3].vert].xyz, 1));
 	
 	float d0[3];
 	float d1[3];
 	CreateWireframeArgs(v0, v1, v2, d0);
 	CreateWireframeArgs(v0, v2, v3, d1);
 	
-	verts[6 * (threadID % 32) + 0] = MakeWireframeVert(v0, float3(d0[0], 0, 0), inputVerts[he0.vert].color, threadID);
-	verts[6 * (threadID % 32) + 1] = MakeWireframeVert(v1, float3(0, d0[1], 0), inputVerts[he1.vert].color, threadID);
-	verts[6 * (threadID % 32) + 2] = MakeWireframeVert(v2, float3(0, 0, d0[2]), inputVerts[he2.vert].color, threadID);
+	verts[6 * (threadID % 32) + 0] = MakeWireframeVert(v0, float3(d0[0], 0, 0), inputVerts[edges[0].vert].color, threadID);
+	verts[6 * (threadID % 32) + 1] = MakeWireframeVert(v1, float3(0, d0[1], 0), inputVerts[edges[1].vert].color, threadID);
+	verts[6 * (threadID % 32) + 2] = MakeWireframeVert(v2, float3(0, 0, d0[2]), inputVerts[edges[2].vert].color, threadID);
 	
-	verts[6 * (threadID % 32) + 3] = MakeWireframeVert(v0, float3(d1[0], 0, 0), inputVerts[he0.vert].color, threadID);
-	verts[6 * (threadID % 32) + 4] = MakeWireframeVert(v2, float3(0, d1[1], 0), inputVerts[he2.vert].color, threadID);
-	verts[6 * (threadID % 32) + 5] = MakeWireframeVert(v3, float3(0, 0, d1[2]), inputVerts[he3.vert].color, threadID);
+	verts[6 * (threadID % 32) + 3] = MakeWireframeVert(v0, float3(d1[0], 0, 0), inputVerts[edges[0].vert].color, threadID);
+	verts[6 * (threadID % 32) + 4] = MakeWireframeVert(v2, float3(0, d1[1], 0), inputVerts[edges[2].vert].color, threadID);
+	verts[6 * (threadID % 32) + 5] = MakeWireframeVert(v3, float3(0, 0, d1[2]), inputVerts[edges[3].vert].color, threadID);
 		
 	tris[2 * (threadID % 32) + 0] = uint3(6 * (threadID % 32) + 0, 6 * (threadID % 32) + 1, 6 * (threadID % 32) + 2);
 	tris[2 * (threadID % 32) + 1] = uint3(6 * (threadID % 32) + 3, 6 * (threadID % 32) + 4, 6 * (threadID % 32) + 5);	

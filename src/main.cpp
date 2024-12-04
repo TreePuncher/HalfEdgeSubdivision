@@ -196,8 +196,8 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 #if 1
 		//ModifiableShape shape = LoadObjIntoShape(R"(assets\ferris.obj)");
-		ModifiableShape shape = LoadObjIntoShape(R"(assets\marie.obj)");
-		//ModifiableShape shape = LoadObjIntoShape(R"(assets\TestPlane.obj)");
+		//ModifiableShape shape = LoadObjIntoShape(R"(assets\marie.obj)");
+		ModifiableShape shape = LoadObjIntoShape(R"(assets\TestPlane.obj)");
 		//ModifiableShape shape = LoadObjIntoShape(R"(assets\imrod.obj)");
 #else
 		ModifiableShape shape{};

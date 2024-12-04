@@ -164,9 +164,9 @@ struct Vertex
 Vertex MakeVertex(float3 xyz, uint color = 0, float2 UV = float2(0, 0))
 {
 	Vertex v;
-	v.xyz = xyz;
-	v.color = color;
-	v.UV = UV;
+	v.xyz		= xyz;
+	v.color		= color;
+	v.UV		= UV;
 	
 	return v;
 }
@@ -249,6 +249,94 @@ void SubdividePatch(
 	}
 
 	outputPoints[idx + vertexCount - 1] = MakeVertex(facePoint / beginCount.y, 6);
+}
+
+
+/************************************************************************************************/
+
+
+void GetSubTwinEdges(uint i, inout TwinEdge edges[4])
+{
+	TwinEdge he				= edges[i % 4];
+	TwinEdge hePrev			= edges[Next(i % 4)];
+	const uint vertexCount	= 9;
+	
+	TwinEdge edge0;
+	edge0.twin	= he.Border() ? BORDERVALUE : (Next(he.Twin()) * 4 + 3);
+	edge0.vert	= i * 9 + 2 * i + 0;
+	edge0.MarkCorner(he.IsCorner());
+	edge0.MarkT(he.IsT());
+	edges[0]	= edge0;
+	
+	TwinEdge edge1;
+	edge1.twin	= (i * 9 + (4 + i + 1) % 4) * 4 + 2;
+	edge1.vert	= i * 9 + 2 * i + 1;
+	edge1.MarkT(edge0.Border());
+	edges[1]	= edge1;
+	
+	TwinEdge edge2;
+	edge2.twin	= (i * 9 + (4 + i - 1) % 4) * 4 + 1;
+	edge2.vert	= i * 9 + vertexCount - 1;
+	edges[2]	= edge2;
+	
+	TwinEdge edge3;
+	edge3.twin	= hePrev.Border() ? BORDERVALUE : (hePrev.Twin() * 4);
+	edge3.vert	= i * 9 + (vertexCount - 2 + 2 * i) % (vertexCount - 1);
+	edges[3]	= edge3;
+}
+
+
+/************************************************************************************************/
+
+
+void GetTwinEdges(uint3 face, uint i, out TwinEdge edges[4], StructuredBuffer<HalfEdge> inputCage)
+{
+	HalfEdge he				= inputCage[face.x + i];
+	HalfEdge hePrev			= inputCage[he.prev];
+	const uint vertexCount	= 1 + 2 * face.y;
+	
+	TwinEdge edge0;
+	edge0.twin	= he.Border() ? BORDERVALUE : (Next(inputCage, he.Twin()) * 4 + 3);
+	edge0.vert	= face.z + 2 * i + 0;
+	edge0.MarkCorner(he.IsCorner());
+	edge0.MarkT(he.IsT());
+	edges[0]	= edge0;
+	
+	TwinEdge edge1;
+	edge1.twin	= (face.z + (face.y + i + 1) % face.y) * 4 + 2;
+	edge1.vert	= face.z + 2 * i + 1;
+	edge1.MarkT(edge0.Border());
+	edges[1]	= edge1;
+	
+	TwinEdge edge2;
+	edge2.twin	= (face.z + (face.y + i - 1) % face.y) * 4 + 1;
+	edge2.vert	= face.z + vertexCount - 1;
+	edges[2]	= edge2;
+	
+	TwinEdge edge3;
+	edge3.twin	= hePrev.Border() ? BORDERVALUE : (hePrev.Twin() * 4);
+	edge3.vert	= face.z + (vertexCount - 2 + 2 * i) % (vertexCount - 1);
+	edges[3]	= edge3;
+}
+
+
+/************************************************************************************************/
+
+
+void GetTwinEdges2(uint i, uint level, inout TwinEdge edges[4], StructuredBuffer<HalfEdge> inputCage, StructuredBuffer<uint3> inputFaces, StructuredBuffer<uint> faceLookup)
+{
+	const uint parentHalfEdge	= i >> (2 * level);
+	const uint3 face			= inputFaces[faceLookup[parentHalfEdge]];
+	GetTwinEdges(face, i % face.y, edges, inputCage);
+	
+	uint edgeID = parentHalfEdge;
+	while (level > 0)
+	{
+		level--;
+		edgeID = i >> (2 * level);;
+		uint3 virtualFace = uint3(edgeID, 4, 9 * (i));
+		GetSubTwinEdges(edgeID, edges);
+	}
 }
 
 

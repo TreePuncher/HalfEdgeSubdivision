@@ -11,8 +11,9 @@ StructuredBuffer<Vertex>	inputPoints : register(t1);
 StructuredBuffer<uint3>		inputFaces	: register(t2);
 StructuredBuffer<uint>		faceLookup	: register(t3);
 
-globallycoherent RWStructuredBuffer<TwinEdge>	cages[]		: register(u0, space1);
-globallycoherent RWStructuredBuffer<Vertex>		points[]	: register(u0, space2);
+RWStructuredBuffer<TwinEdge>	cages[]		: register(u0, space1);
+RWStructuredBuffer<Vertex>		points[]	: register(u0, space2);
+//RWStructuredBuffer<uint>		presence[]	: register(u0, space3);
 
 
 cbuffer ViewConstants : register(b0)
@@ -102,9 +103,7 @@ void BuildBaseCage(
 	if(dispatchThreadID >= args.Get().patchCount)
 		return;
 
-	const uint3 range		= inputFaces[dispatchThreadID];
-	const uint vertexCount	= 1 + 2 * range.y;
-
+	const uint3 face = inputFaces[dispatchThreadID];
 
 	float3 f = float3(0, 0, 0);
 #define CULL 0
@@ -129,41 +128,20 @@ void BuildBaseCage(
 	}
 	
 	if(Intersects(frustum, aabb))
-	{
 #endif
-#if 1
-		for(int i = 0; i < range.y; i++)
-		{	
-			const uint outputIdx = 4 * (range.x + i);
+	
+	for(int i = 0; i < face.y; i++)
+	{	
+		const uint outputIdx = 4 * (face.x + i);
 		
-			HalfEdge he		= inputCage[range.x + i];
-			HalfEdge heNext	= inputCage[he.next];
-			HalfEdge hePrev = inputCage[he.prev];
-			
-			TwinEdge edge0;
-			edge0.twin = he.Border() ? BORDERVALUE : (Next(inputCage, he.Twin()) * 4 + 3);
-			edge0.vert = range.z + 2 * i + 0;
-			edge0.MarkCorner(he.IsCorner());
-			edge0.MarkT(he.IsT());
-			cages[0][outputIdx + 0] = edge0;
-
-			TwinEdge edge1;
-			edge1.twin = (range.z + (range.y + i + 1) % range.y) * 4 + 2;
-			edge1.vert = range.z + 2 * i + 1;
-			edge1.MarkT(edge0.Border());
-			cages[0][outputIdx + 1] = edge1;
+		TwinEdge edges[4];
+		GetTwinEdges(face, i, edges, inputCage);
 		
-			TwinEdge edge2;
-			edge2.twin = (range.z + (range.y + i - 1) % range.y) * 4 + 1;
-			edge2.vert = range.z + vertexCount - 1;
-			cages[0][outputIdx + 2] = edge2;
-		
-			TwinEdge edge3;
-			edge3.twin = hePrev.Border() ? BORDERVALUE : (hePrev.Twin() * 4);
-			edge3.vert = range.z + (vertexCount - 2 + 2 * i) % (vertexCount - 1);
-			cages[0][outputIdx + 3] = edge3;	
-		}
-#endif
+		cages[0][outputIdx + 0] = edges[0];
+		cages[0][outputIdx + 1] = edges[1];
+		cages[0][outputIdx + 2] = edges[2];
+		cages[0][outputIdx + 3] = edges[3];
+	}
 }
 
 
@@ -320,7 +298,7 @@ void BuildVertices(
 			
 			if (n > 16)
 			{
-				prevSelection == BORDERVALUE;
+				prevSelection = BORDERVALUE;
 				break;
 			}
 		}
@@ -337,7 +315,7 @@ void BuildVertices(
 		
 			if (n > 16)
 			{
-				prevSelection == BORDERVALUE;
+				prevSelection = BORDERVALUE;
 				break;
 			}
 		}
