@@ -6,22 +6,25 @@
 /************************************************************************************************/
 
 
-StructuredBuffer<HalfEdge>	inputCage	: register(t0);
-StructuredBuffer<Vertex>	inputPoints : register(t1);
-StructuredBuffer<HE_Face>	inputFaces	: register(t2);
-StructuredBuffer<uint>		faceLookup	: register(t3);
-RWStructuredBuffer<HE_Face>	outFaces	: register(u0, space0);
 
+StructuredBuffer<HalfEdge>		inputCage	: register(t0);
+StructuredBuffer<Vertex>		inputPoints : register(t1);
+StructuredBuffer<HE_Face>		inputFaces	: register(t2);
+StructuredBuffer<uint>			faceLookup	: register(t3);
+
+RWStructuredBuffer<uint32_t>	cbt			: register(u0, space0);
 RWStructuredBuffer<TwinEdge>	cages[]		: register(u0, space1);
 RWStructuredBuffer<Vertex>		points[]	: register(u0, space2);
-//RWStructuredBuffer<uint>		presence[]	: register(u0, space3);
 
+RWStructuredBuffer<FaceID>				faceDrawList	: register(u1);
+RWStructuredBuffer<DispatchMeshArgs>	drawArgs		: register(u2);
 
 cbuffer ViewConstants : register(b0)
 {
 	float4x4	view;
 	uint		heCount;
 	uint		patchCount;
+	uint		maxDepth;
 };
 
 cbuffer ViewConstants : register(b1)
@@ -64,6 +67,164 @@ struct TwinEdgeBuild
 	uint	faceSize;
 	uint3	dispatchSize : SV_DispatchGrid;
 };
+
+uint DispatchXSize(uint x, uint groupSize)
+{
+	return x / groupSize + (x % groupSize != 0);
+}
+
+
+/************************************************************************************************/
+
+
+struct LaunchClassifyParams
+{
+	uint3	xyz : SV_DispatchGrid;
+	uint	dispatchesRemaining;
+	uint	faceCounter;
+};
+
+
+struct [NodeTrackRWInputSharing] SumReductionArgs
+{
+	uint32_t i;
+	uint32_t stepSize;
+	uint32_t end;
+	uint32_t start_IN;
+	uint32_t start_OUT;
+	uint3	 xyz : SV_DispatchGrid;
+};
+
+
+/************************************************************************************************/
+
+
+uint GetDispatchX(uint W, uint groupSize)
+{
+	return (W / groupSize) + (W % groupSize == 0 ? 0 : 1);
+}
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NodeMaxDispatchGrid(16000, 1, 1)]
+[NumThreads(32, 1, 1)]
+void Classify(	RWDispatchNodeInputRecord<LaunchClassifyParams>		args, 
+				[MaxRecords(1)]		NodeOutput<SumReductionArgs>	CBTSumReduction,
+									const uint						dispatchThreadID	: SV_DispatchThreadID,
+									const uint						threadID			: SV_GroupIndex)
+{
+	if(dispatchThreadID < patchCount)
+	{
+		const HE_Face face = inputFaces[dispatchThreadID];
+
+		AABB aabb;
+		aabb.mMin = float3( 100000,  100000,  100000);
+		aabb.mMax = float3(-100000, -100000, -100000);	
+	
+		for(int i = 0; i < face.edgeCount; i++)
+		{	
+			HalfEdge he = inputCage[face.begin + i];
+		
+			const float3 xyz = inputPoints[he.vert].xyz;
+			aabb.Add(mul(view, float4(xyz, 1)));
+		}
+	
+		const bool intersects = Intersects(frustum, aabb);
+
+		if(intersects)
+		{
+			SetBit(cbt, dispatchThreadID, true, maxDepth);
+		
+			for(int j = 0; j < face.edgeCount; j++)
+			{
+				HalfEdge he = inputCage[face.begin + j];
+				
+				if(!he.Border())
+					SetBit(cbt, faceLookup[he.Twin()], true, maxDepth);
+			}
+
+			uint faceIdx;
+			InterlockedAdd(args.Get().faceCounter, face.edgeCount, faceIdx);
+			for(int i = 0; i < face.edgeCount; i++)
+				faceDrawList[faceIdx + i] = MakeFaceID(face.begin + i, 0, face.vertexRange);
+		}
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	int idx = 0;
+	if (threadID == 0)
+		InterlockedAdd(args.Get().dispatchesRemaining, -1, idx);
+	
+	Barrier(ALL_MEMORY, DEVICE_SCOPE);
+
+	//ThreadNodeOutputRecords<SumReductionArgs> sumReduction = CBTSumReduction.GetThreadNodeOutputRecords(idx == 1);
+	//
+	//if(idx == 1)
+	//{
+	//	sumReduction.Get().stepSize		= 1;
+	//	sumReduction.Get().i			= 0;
+	//	sumReduction.Get().end			= ipow(2, maxDepth - 1);
+	//	sumReduction.Get().start_IN		= GetBitOffset(ipow(2, maxDepth - 0), maxDepth);
+	//	sumReduction.Get().start_OUT	= GetBitOffset(ipow(2, maxDepth - 1), maxDepth);
+	//	sumReduction.Get().xyz			= uint3(GetDispatchX(ipow(2, maxDepth - 1), 32), 1, 1);
+
+		drawArgs[0] = MakeDrawListArgs(args.Get().faceCounter);
+	//}
+
+	//sumReduction.OutputComplete();
+}
+
+
+/************************************************************************************************/
+
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NodeMaxDispatchGrid(16000, 1, 1)]
+[NodeMaxRecursionDepth(25)]
+[NumThreads(32, 1, 1)]
+void CBTSumReduction(	
+	RWDispatchNodeInputRecord<SumReductionArgs>		args, 
+	[MaxRecords(1)]	NodeOutput<SumReductionArgs>	CBTSumReduction,
+	const uint										j : SV_DispatchThreadID,
+	const uint										threadID : SV_GroupIndex)
+{
+	const uint i	= args.Get().i;
+	const uint end	= args.Get().end;
+
+	const uint start_IN		= args.Get().start_IN;
+	const uint start_OUT	= args.Get().start_OUT;
+	const uint stepSize		= args.Get().stepSize;
+
+	if (j < end)
+	{
+		const uint32_t a = ReadValue(cbt, start_IN + (2 * j + 0) * stepSize, i + 1);
+		const uint32_t b = ReadValue(cbt, start_IN + (2 * j + 1) * stepSize, i + 1);
+		const uint32_t c = a + b;
+ 		
+		WriteValue(cbt, args.Get().start_OUT + j * (args.Get().stepSize + 1), args.Get().i + 2, c);
+	}	
+
+	const bool submitNext = (args.FinishedCrossGroupSharing() && threadID == 0  && i + 1 < maxDepth);
+	
+	Barrier(ALL_MEMORY, DEVICE_SCOPE);
+
+	ThreadNodeOutputRecords<SumReductionArgs> next = CBTSumReduction.GetThreadNodeOutputRecords(submitNext);
+	if (submitNext)
+	{
+		const uint32_t ip		= i + 1;
+		
+		next.Get().stepSize		= stepSize + 1;
+		next.Get().i			= ip;
+		next.Get().end			= end / 2;
+		next.Get().start_IN		= GetBitOffset(ipow(2, maxDepth - 0 - ip), maxDepth);
+		next.Get().start_OUT	= GetBitOffset(ipow(2, maxDepth - 1 - ip), maxDepth);
+		next.Get().xyz			= uint3(end / 2, 1, 1);
+	}
+
+	next.OutputComplete();
+}
 
 
 /************************************************************************************************/
@@ -135,11 +296,12 @@ struct BuildFace2Args
 
 struct LaunchSubDivParams
 {
+	uint3	xyz  : SV_DispatchGrid;
 	uint	dispatchesRemaining;
 	uint	patchCount;
 	uint	halfEdgeCount;
-	uint3	xyz  : SV_DispatchGrid;
 };
+
 
 struct BuildFacesArgs
 {
@@ -147,6 +309,7 @@ struct BuildFacesArgs
 	uint	patchCount;
 	uint3	dispatchSize : SV_DispatchGrid;
 };
+
 
 struct BuildEdgesArgs
 {
@@ -165,11 +328,8 @@ groupshared uint			localEdgeCount;
 void SubdivideHalfEdgeMesh(
 						RWDispatchNodeInputRecord<LaunchSubDivParams>	args,
 	[MaxRecords(1)]		NodeOutput<BuildFace2Args>						BuildEdges2,
-	//[MaxRecords(1)]	NodeOutput<BuildFacesArgs>						BuildFaces,
-	//[MaxRecords(1)]	NodeOutput<BuildEdgesArgs>						BuildEdges,
-	//[MaxRecords(1)]	NodeOutput<BuildEdgesArgs>						BuildVertices,
-					const uint										dispatchThreadID	: SV_DispatchThreadID, 
-					const uint										groupDispatchID		: SV_GroupIndex)
+					const uint											dispatchThreadID	: SV_DispatchThreadID, 
+					const uint											groupDispatchID		: SV_GroupIndex)
 {
 	if(dispatchThreadID >= patchCount)
 		return;
@@ -228,27 +388,6 @@ void SubdivideHalfEdgeMesh(
 	}
 
 	dispatchEdges.OutputComplete();
-
-#if 0
-	const uint patchCount		= args.Get().patchCount;
-	const uint halfEdgeCount	= args.Get().halfEdgeCount;
-
-	ThreadNodeOutputRecords<BuildFacesArgs> launchFaces = BuildFaces.GetThreadNodeOutputRecords(1);
-	launchFaces.Get().patchCount		= patchCount;
-	launchFaces.Get().remaining			= patchCount;
-	launchFaces.Get().dispatchSize		= uint3(patchCount / 1024 + (patchCount % 1024 == 0 ? 0 : 1), 1, 1);
-	launchFaces.OutputComplete();
-
-	ThreadNodeOutputRecords<BuildEdgesArgs> launchEdges = BuildEdges.GetThreadNodeOutputRecords(1);
-	launchEdges.Get().halfEdgeCount		= heCount;
-	launchEdges.Get().dispatchSize		= uint3(heCount / 1024 + (heCount % 1024 == 0 ? 0 : 1), 1, 1);
-	launchEdges.OutputComplete();
-
-	ThreadNodeOutputRecords<BuildEdgesArgs> launchVertex = BuildVertices.GetThreadNodeOutputRecords(1);
-	launchVertex.Get().halfEdgeCount	= halfEdgeCount;
-	launchVertex.Get().dispatchSize		= uint3(halfEdgeCount / 1024 + (halfEdgeCount % 1024 == 0 ? 0 : 1), 1, 1);
-	launchVertex.OutputComplete();
-#endif
 }
 
 

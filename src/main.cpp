@@ -1,5 +1,6 @@
 #include "TestComponent.hpp"
 #include "HalfEdgeMesh.hpp"
+#include "CBT.hpp"
 
 #include <Application.hpp>
 #include <atomic>
@@ -181,7 +182,7 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		renderWindow->Handler.Subscribe(sub);
 
 #if _DEBUG
-		renderWindow->SetWindowTitle("Hello Subdivion - Debug");
+		renderWindow->SetWindowTitle("Hello Subdivision - Debug");
 #else
 		renderWindow->SetWindowTitle("Hello Subdivion");
 #endif
@@ -189,10 +190,6 @@ struct CBTTerrainState : FlexKit::FrameworkState
 		constantBuffer	= renderSystem.CreateConstantBuffer(MEGABYTE, false);
 		vertexBuffer	= renderSystem.CreateVertexBuffer(512, false);
 		renderSystem.RegisterPSOLoader(FlexKit::DRAW_PSO, FlexKit::CreateDrawTriStatePSO);
-
-		runOnce.push_back([&](FlexKit::FrameGraph& frameGraph)
-			{
-			});
 
 #if 1
 		//ModifiableShape shape = LoadObjIntoShape(R"(assets\wolfgirl.obj)");
@@ -378,10 +375,9 @@ struct CBTTerrainState : FlexKit::FrameworkState
 
 		if (HEMesh && activeCamera != FlexKit::InvalidHandle)
 		{
-			if(updateAdaptiveLOD)
-				HEMesh->AdaptiveSubdivUpdate(frameGraph, activeCamera);
+			auto& adaptiveUpdate = HEMesh->AdaptiveSubdivUpdate(frameGraph, activeCamera);
 			
-			HEMesh->DrawSubDivLevel_DEBUG(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer(), depthBuffer.Get(), adaptiveLODlevel);
+			HEMesh->DrawSubDivLevel_DEVEL(frameGraph, activeCamera, &cameraUpdate, renderWindow->GetBackBuffer(), depthBuffer.Get(), adaptiveUpdate);
 		}
 
 		PresentBackBuffer(frameGraph, renderWindow->GetBackBuffer());

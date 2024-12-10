@@ -346,6 +346,27 @@ void GetTwinEdges(HE_Face face, uint i, out TwinEdge edges[4], StructuredBuffer<
 /************************************************************************************************/
 
 
+struct FaceID
+{
+	uint faceID;
+	uint level;
+	uint vertexRange;
+};
+
+
+FaceID MakeFaceID(uint idx, uint level, uint vertexRange)
+{
+	FaceID OUT;
+	OUT.faceID		= idx;
+	OUT.level		= level;
+	OUT.vertexRange = vertexRange;
+	return OUT;
+}
+
+
+/************************************************************************************************/
+
+
 void GetTwinEdges2(uint i, uint level, inout TwinEdge edges[4], StructuredBuffer<HalfEdge> inputCage, StructuredBuffer<HE_Face> inputFaces, StructuredBuffer<uint> faceLookup)
 {
 	const uint parentHalfEdge	= i >> (2 * level);
@@ -360,6 +381,47 @@ void GetTwinEdges2(uint i, uint level, inout TwinEdge edges[4], StructuredBuffer
 		HE_Face virtualFace = MakeFace(edgeID, 9 * (i), 4, level);
 		GetSubTwinEdges(edgeID, edges);
 	}
+}
+
+
+void GetTwinEdges2(FaceID id, inout TwinEdge edges[4], StructuredBuffer<HalfEdge> inputCage, StructuredBuffer<HE_Face> inputFaces, StructuredBuffer<uint> faceLookup)
+{
+	const uint parentHalfEdge	= id.faceID;// >> (2 * id.level);
+	const uint faceId			= faceLookup[parentHalfEdge];
+	const HE_Face face			= inputFaces[faceId];
+	GetTwinEdges(face, parentHalfEdge - face.begin, edges, inputCage);
+	
+	//uint edgeID = parentHalfEdge;
+	//while (id.level > 0)
+	//{
+	//	id.level--;
+	//	edgeID = id.faceID >> (2 * id.level);;
+	//	HE_Face virtualFace = MakeFace(edgeID, 9 * (id.faceID), 4, id.level);
+	//	GetSubTwinEdges(edgeID, edges);
+	//}
+}
+
+
+/************************************************************************************************/
+
+
+struct DispatchMeshArgs
+{
+	uint  drawCount;
+	uint3 dispatchXYZ;
+};
+
+
+DispatchMeshArgs MakeDrawListArgs(in const uint faceCount)
+{
+	DispatchMeshArgs args;
+	args.drawCount		= faceCount;
+	args.dispatchXYZ.x	= 1;
+	args.dispatchXYZ.x  = faceCount / 32 + (faceCount % 32 != 0);
+	args.dispatchXYZ.y	= 1;
+	args.dispatchXYZ.z	= 1;
+	
+	return args;
 }
 
 

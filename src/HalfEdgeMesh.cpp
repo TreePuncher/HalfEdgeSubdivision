@@ -78,6 +78,11 @@ namespace FlexKit
 		controlPoints		= IN_renderSystem.CreateGPUResource(GPUResourceDesc::StructuredResource(meshPoints.ByteSize()));
 		faceLookup			= IN_renderSystem.CreateGPUResource(GPUResourceDesc::StructuredResource(faceLookupBuffer.ByteSize()));
 
+		IN_renderSystem.SetDebugName(controlFaces, "controlFaces");
+		IN_renderSystem.SetDebugName(controlCage, "controlCage");
+		IN_renderSystem.SetDebugName(controlPoints, "controlPoints");
+		IN_renderSystem.SetDebugName(faceLookup, "faceLookup");
+
 		controlCageSize		= halfEdges.size();
 		controlCageFaces	= faces.size();
 		const uint32_t level0PointCount = (shape.wFaces.size() + shape.wEdges.size() * 2);
@@ -129,7 +134,8 @@ namespace FlexKit
 				faceLookupBuffer.data(),
 				faceLookupBuffer.ByteSize(), 1, FlexKit::DASNonPixelShaderResource);
 
-		cbt.Initialize({ .maxDepth = 14 });
+		auto depth = (uint32_t)std::ceilf(std::log2f(edgeCount));
+		cbt.Initialize({ .maxDepth = depth });
 
 		static bool registerStates = 
 			[&]
@@ -140,7 +146,7 @@ namespace FlexKit
 				heap1.SetParameterAsShaderUAV(0, 0, -1, 2);
 
 				RootSignatureBuilder builder{ IN_allocator };
-				builder.SetParameterAsUINT(0, 18, 0, 0);
+				builder.SetParameterAsUINT(0, 20, 0, 0);
 				builder.SetParameterAsSRV(1, 0, 0);
 				builder.SetParameterAsSRV(2, 1, 0);
 				builder.SetParameterAsSRV(3, 2, 0);
@@ -149,57 +155,50 @@ namespace FlexKit
 				builder.SetParameterAsCBV(6, 1);
 				builder.SetParameterAsSRV(7, 3);
 				builder.SetParameterAsUAV(8, 0);
+				builder.SetParameterAsUAV(9, 1);
+				builder.SetParameterAsUAV(10, 2);
 				globalRoot = builder.Build(IN_renderSystem, IN_temp);
 
 				updateState = LibraryBuilder{ IN_temp }.
 					LoadShaderLibrary("assets\\shaders\\HalfEdge\\HE_AdaptiveCC.hlsl").
-					//LoadShaderLibrary("assets\\shaders\\HalfEdge\\HE_CatmullClark.hlsl").
 					AddGlobalRootSignature(*globalRoot).
 					AddWorkGroup("HE_Builder", {}).
 					BuildStateObject();
 
-				programID		= updateState->GetProgramID("HE_Builder");
-				initiate		= updateState->GetEntryPointIndex("InitiateHalfEdgeMesh");
-				subdivide		= updateState->GetEntryPointIndex("SubdivideHalfEdgeMesh");
+				programID	= updateState->GetProgramID("HE_Builder");
+				initiate	= updateState->GetEntryPointIndex("InitiateHalfEdgeMesh");
+				subdivide	= updateState->GetEntryPointIndex("SubdivideHalfEdgeMesh");
+				classify	= updateState->GetEntryPointIndex("Classify");
 
 				IN_renderSystem.RegisterPSOLoader(
 					BuildBisectors,
-					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator) 
+					[](RenderSystem* renderSystem, iAllocator& allocator) 
 					{
-						return FlexKit::PipelineBuilder{ allocator }.
+						return PipelineBuilder{ allocator }.
 							AddComputeShader("BuildBisectors", "assets\\shaders\\HalfEdge\\HE_Initialize.hlsl", { .hlsl2021 = true }).
 							Build(*renderSystem);
 					});
 
 				IN_renderSystem.RegisterPSOLoader(
 					BuildLevel,
-					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
+					[](RenderSystem* renderSystem, iAllocator& allocator)
 					{
-						return FlexKit::PipelineBuilder{ allocator }.
+						return PipelineBuilder{ allocator }.
 							AddComputeShader("BuildLevel", "assets\\shaders\\HalfEdge\\HE_ComputeLevel.hlsl", { .hlsl2021 = true }).
 							Build(*renderSystem);
 					});
-
-				//IN_renderSystem.RegisterPSOLoader(
-				//	EdgeUpdate,
-				//	[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
-				//	{
-				//		return FlexKit::PipelineBuilder{ allocator }.
-				//			AddComputeShader("EdgePass", "assets\\shaders\\HalfEdge\\HalfEdge.hlsl", { .hlsl2021 = true }).
-				//			Build(*renderSystem);
-				//	});
 				
 				IN_renderSystem.RegisterPSOLoader(
 					RenderFaces,
-					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
+					[](RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
 					{
-						return FlexKit::PipelineBuilder{ allocator }.
+						return PipelineBuilder{ allocator }.
 							AddMeshShader("MeshMain",	"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .enable16BitTypes = true, .hlsl2021 = true }).
 							AddPixelShader("PMain",		"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .enable16BitTypes = true, .hlsl2021 = true }).
-							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE}).
+							AddRasterizerState({ .fill = EFillMode::SOLID, .CullMode = ECullMode::NONE}).
 							AddRenderTargetState(
 								{	.targetCount	= 1,
-									.targetFormats	= { FlexKit::DeviceFormat::R16G16B16A16_FLOAT } }).
+									.targetFormats	= { DeviceFormat::R16G16B16A16_FLOAT } }).
 							AddDepthStencilFormat(DeviceFormat::D32_FLOAT).
 							AddDepthStencilState({ .depthEnable = true, .depthFunc = EComparison::LESS }).
 							Build(*renderSystem);
@@ -207,9 +206,9 @@ namespace FlexKit
 
 				IN_renderSystem.RegisterPSOLoader(
 					RenderWireframe,
-					[](FlexKit::RenderSystem* renderSystem, FlexKit::iAllocator& allocator)
+					[&](RenderSystem* renderSystem, iAllocator& allocator)
 					{
-						return FlexKit::PipelineBuilder{ allocator }.
+						auto PSO = PipelineBuilder{ allocator }.
 							AddMeshShader("WireMain",			"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .enable16BitTypes = true, .hlsl2021 = true }).
 							AddPixelShader("WhiteWireframe",	"assets\\shaders\\HalfEdge\\HE_BasicForwardRender.hlsl", { .enable16BitTypes = true, .hlsl2021 = true }).
 							AddRasterizerState({ .fill = FlexKit::EFillMode::SOLID, .CullMode = FlexKit::ECullMode::NONE }).
@@ -219,6 +218,14 @@ namespace FlexKit
 							AddDepthStencilFormat(DeviceFormat::D32_FLOAT).
 							AddDepthStencilState({ .depthEnable = true, .depthFunc = EComparison::LESS }).
 							Build(*renderSystem);
+
+						if(PSO.pipelineState)
+							indirectDraw = IN_renderSystem.CreateIndirectLayout(
+								{	IndirectDrawDescription::Constant{ .rootParameterIdx = 5, .destinationOffset = 16, .numValues = 1 },
+									IndirectDrawDescription{ ILE_DispatchMesh } },
+								IN_temp, PSO.rootSignature);
+
+						return PSO;
 					});
 
 				IN_renderSystem.QueuePSOLoad(BuildBisectors);
@@ -248,115 +255,6 @@ namespace FlexKit
 	/************************************************************************************************/
 
 
-	void HalfEdgeMesh::BuildSubDivLevel(FlexKit::FrameGraph& frameGraph)
-	{
-		if (levelsBuilt >= 2)
-			return;
-
-		struct buildLevel
-		{
-			FrameResourceHandle inputCage;
-			FrameResourceHandle inputVerts;
-			FrameResourceHandle inputFaces;
-
-			FrameResourceHandle outputCage;
-			FrameResourceHandle outputVerts;
-			FrameResourceHandle counters;
-
-			uint32_t inputEdgeCount;
-			uint32_t faceCount;
-		};
-
-		if(levelsBuilt == 0)
-		{
-			frameGraph.AddOutput(levels[0]);
-			frameGraph.AddOutput(points[0]);
-
-			frameGraph.AddNode<buildLevel>(
-				{},
-				[&](FrameGraphNodeBuilder& builder, buildLevel& subDivData)
-				{
-					builder.Requires(BuildBisectors);
-					subDivData.inputCage		= builder.NonPixelShaderResource(controlCage);
-					subDivData.inputVerts		= builder.NonPixelShaderResource(controlPoints);
-					subDivData.inputFaces		= builder.NonPixelShaderResource(controlFaces);
-					subDivData.inputEdgeCount	= controlCageSize;
-					subDivData.faceCount		= controlCageFaces;
-					edgeCount[levelsBuilt]		= controlCageSize * 4;
-
-					subDivData.outputCage		= builder.UnorderedAccess(levels[levelsBuilt]);
-					subDivData.outputVerts		= builder.UnorderedAccess(points[levelsBuilt]);
-					subDivData.counters			= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(512), FlexKit::DASUAV);
-
-					levelsBuilt++;
-				},
-				[this](buildLevel& subDivData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
-				{
-					ctx.BeginEvent_DEBUG("Subdivision : Build Level");
-
-					ctx.DiscardResource(resources.GetResource(subDivData.counters));
-					ctx.ClearUAVBuffer(resources.UAV(subDivData.counters, ctx));
-
-					ctx.SetComputePipelineState(BuildBisectors, threadLocalAllocator);
-					ctx.SetComputeUnorderedAccessView(0, resources.UAV(subDivData.outputCage, ctx));
-					ctx.SetComputeUnorderedAccessView(1, resources.UAV(subDivData.outputVerts, ctx));
-					ctx.SetComputeUnorderedAccessView(2, resources.UAV(subDivData.counters, ctx));
-					ctx.SetComputeShaderResourceView(3, resources.NonPixelShaderResource(subDivData.inputCage, ctx));
-					ctx.SetComputeShaderResourceView(4, resources.NonPixelShaderResource(subDivData.inputVerts, ctx));
-					ctx.SetComputeShaderResourceView(5, resources.NonPixelShaderResource(subDivData.inputFaces, ctx));
-					ctx.SetComputeConstantValue(6, 1, &subDivData.faceCount);
-					ctx.Dispatch({ Max(subDivData.faceCount / 64, 1), 1, 1 });
-
-					ctx.EndEvent_DEBUG();
-				});
-		}
-		else
-		{
-			frameGraph.AddOutput(levels[levelsBuilt]);
-			frameGraph.AddOutput(points[levelsBuilt]);
-
-			frameGraph.AddNode<buildLevel>(
-				{},
-				[&](FrameGraphNodeBuilder& builder, buildLevel& subDivData)
-				{
-					builder.Requires(BuildLevel);
-					subDivData.inputCage		= builder.NonPixelShaderResource(levels[levelsBuilt - 1]);
-					subDivData.inputVerts		= builder.NonPixelShaderResource(points[levelsBuilt - 1]);
-					subDivData.inputEdgeCount	= controlCageSize;
-					subDivData.faceCount		= controlCageFaces << (levelsBuilt * 2);
-					edgeCount[levelsBuilt]		= edgeCount[levelsBuilt - 1] * 4;
-
-					subDivData.outputCage		= builder.UnorderedAccess(levels[levelsBuilt]);
-					subDivData.outputVerts		= builder.UnorderedAccess(points[levelsBuilt]);
-					subDivData.counters			= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(512), FlexKit::DASUAV);
-
-					levelsBuilt++;
-				},
-				[this](buildLevel& subDivData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
-				{
-					ctx.BeginEvent_DEBUG("Subdivision : Build Level");
-
-					ctx.DiscardResource(resources.GetResource(subDivData.counters));
-					ctx.ClearUAVBuffer(resources.UAV(subDivData.counters, ctx));
-
-					ctx.SetComputePipelineState(BuildLevel, threadLocalAllocator);
-					ctx.SetComputeUnorderedAccessView(0, resources.UAV(subDivData.outputCage, ctx));
-					ctx.SetComputeUnorderedAccessView(1, resources.UAV(subDivData.outputVerts, ctx));
-					ctx.SetComputeUnorderedAccessView(2, resources.UAV(subDivData.counters, ctx));
-					ctx.SetComputeShaderResourceView(3, resources.NonPixelShaderResource(subDivData.inputCage, ctx));
-					ctx.SetComputeShaderResourceView(4, resources.NonPixelShaderResource(subDivData.inputVerts, ctx));
-					ctx.SetComputeConstantValue(5, 1, &subDivData.faceCount);
-					ctx.Dispatch({ Max(1, 1), 1, 1 });
-
-					ctx.EndEvent_DEBUG();
-				});
-		}
-	}
-
-
-	/************************************************************************************************/
-
-
 	void HalfEdgeMesh::InitializeMesh(FlexKit::FrameGraph& frameGraph)
 	{
 		struct BuildLevels
@@ -378,7 +276,7 @@ namespace FlexKit
 		};
 
 		levelsBuilt++;
-
+		
 		frameGraph.AddNode<BuildLevels>(
 			{},
 			[&](FrameGraphNodeBuilder& builder, BuildLevels& subDivData)
@@ -477,35 +375,38 @@ namespace FlexKit
 
 	/************************************************************************************************/
 
-
-	void HalfEdgeMesh::AdaptiveSubdivUpdate(FlexKit::FrameGraph& frameGraph, FlexKit::CameraHandle camera)
+	struct AdaptiveUpdate
 	{
-		struct BuildLevels
-		{
-			FrameResourceHandle meshDrawInfo		= InvalidHandle;
-			FrameResourceHandle meshDrawFaces		= InvalidHandle;
+		FrameResourceHandle cbt					= InvalidHandle;
 
-			FrameResourceHandle constantSpace		= InvalidHandle;
+		FrameResourceHandle constantSpace		= InvalidHandle;
 
-			FrameResourceHandle backingSpace		= InvalidHandle;
-			FrameResourceHandle localRootSigSpace	= InvalidHandle;
+		FrameResourceHandle backingSpace		= InvalidHandle;
+		FrameResourceHandle localRootSigSpace	= InvalidHandle;
 
-			FrameResourceHandle inputCage	= InvalidHandle;
-			FrameResourceHandle inputPoints	= InvalidHandle;
-			FrameResourceHandle InputFaces	= InvalidHandle;
-			FrameResourceHandle faceLookup	= InvalidHandle;
+		FrameResourceHandle inputCage	= InvalidHandle;
+		FrameResourceHandle inputPoints	= InvalidHandle;
+		FrameResourceHandle inputFaces	= InvalidHandle;
+		FrameResourceHandle faceLookup	= InvalidHandle;
 
-			FrameResourceHandle outputCages[3];
-			FrameResourceHandle outputVerts[3];
-		};
+		FrameResourceHandle outputCages[3];
+		FrameResourceHandle outputVerts[3];
 
-		frameGraph.AddNode<BuildLevels>(
+		FrameResourceHandle faceDrawList	= InvalidHandle;
+		FrameResourceHandle indirectDraw	= InvalidHandle;
+	};
+
+
+	AdaptiveUpdate& HalfEdgeMesh::AdaptiveSubdivUpdate(FrameGraph& frameGraph, CameraHandle camera)
+	{
+		return frameGraph.AddNode<AdaptiveUpdate>(
 			{},
-			[&](FrameGraphNodeBuilder& builder, BuildLevels& subDivData)
+			[&](FrameGraphNodeBuilder& builder, AdaptiveUpdate& subDivData)
 			{
 				subDivData.inputCage	= builder.NonPixelShaderResource(controlCage);
 				subDivData.inputPoints	= builder.NonPixelShaderResource(controlPoints);
-				subDivData.InputFaces	= builder.NonPixelShaderResource(controlFaces);
+				subDivData.inputFaces	= builder.NonPixelShaderResource(controlFaces);
+				subDivData.faceLookup	= builder.NonPixelShaderResource(faceLookup);
 
 				for(uint32_t i = 0; i < 3; i++)
 				{
@@ -522,15 +423,19 @@ namespace FlexKit
 				subDivData.faceLookup			= builder.NonPixelShaderResource(faceLookup);
 				subDivData.localRootSigSpace	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASCopyDest);
 				subDivData.constantSpace		= builder.AcquireVirtualResource(GPUResourceDesc::StructuredResource(1024), DASCopyDest);
-
-				subDivData.meshDrawInfo		= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASCopyDest);
-				subDivData.meshDrawFaces	= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1 * MEGABYTE), DASUAV);
+				subDivData.cbt					= builder.UnorderedAccess(cbt.GetBuffer());
+				subDivData.indirectDraw			= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(1024), DASUAV, VirtualResourceScope::Frame);
+				subDivData.faceDrawList			= builder.AcquireVirtualResource(GPUResourceDesc::UAVResource(patchCount[2] * 4), DASUAV, VirtualResourceScope::Frame);
 			},
-			[this, camera](BuildLevels& subDivData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
+			[this, camera](AdaptiveUpdate& subDivData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
 				ctx.BeginEvent_DEBUG("Update Subdivision Levels");
 
 				resources.SetDebugName(subDivData.localRootSigSpace, "localRootSigSpace");
+				resources.SetDebugName(subDivData.constantSpace, "Constant Space");
+
+				ctx.ClearUAVBuffer(cbt.GetBuffer());
+				ctx.AddUAVBarrier(cbt.GetBuffer());
 
 				auto space = resources.GetDevicePointerRange(subDivData.backingSpace);
 
@@ -546,7 +451,7 @@ namespace FlexKit
 				const auto constants = GetCameraConstants(camera);
 				
 				const auto f = GetFrustumVS(camera);
-
+				
 				UploadReservation upload = ctx.ReserveDirectUploadSpace(sizeof(f));
 				memcpy(upload.buffer, &f, sizeof(f));
 
@@ -554,17 +459,29 @@ namespace FlexKit
 				ctx.CopyBuffer(upload, resources.GetResource(subDivData.constantSpace));
 
 				ctx.FlushBarriers();
+				struct
+				{
+					float4x4_GPU view;
+					uint32_t halfEdgeCount;
+					uint32_t patchCount;
+					uint32_t maxDepth;
+				} rootConstants {
+					.view			= constants.View,
+					.halfEdgeCount	= controlCageSize,
+					.patchCount		= controlCageFaces,
+					.maxDepth		= cbt.GetMaxDepth(),
+				};
 
 				ctx.SetComputeRootSignature(globalRoot);
-				ctx.SetComputeConstantValue(0, 16, &constants.View);
-				ctx.SetComputeConstantValue(0, 1, &patchCount[0], 16);
-				ctx.SetComputeConstantValue(0, 1, &controlCageFaces, 17);
-				ctx.SetComputeShaderResourceView(1, resources.GetResource(subDivData.inputCage));
-				ctx.SetComputeShaderResourceView(2, resources.GetResource(subDivData.inputPoints));
-				ctx.SetComputeShaderResourceView(3, resources.GetResource(subDivData.InputFaces));
-				ctx.SetComputeConstantBufferView(6, resources.NonPixelShaderResource(subDivData.constantSpace, ctx, Sync_Copy, Sync_Compute));
-				ctx.SetComputeShaderResourceView(7, resources.GetResource(subDivData.faceLookup));
-				ctx.SetComputeUnorderedAccessView(8, resources.GetResource(subDivData.meshDrawFaces));
+				ctx.SetComputeConstantValue(0, 20, &rootConstants);
+				ctx.SetComputeShaderResourceView(1,		resources.GetResource(subDivData.inputCage));
+				ctx.SetComputeShaderResourceView(2,		resources.GetResource(subDivData.inputPoints));
+				ctx.SetComputeShaderResourceView(3,		resources.GetResource(subDivData.inputFaces));
+				ctx.SetComputeConstantBufferView(6,		resources.NonPixelShaderResource(subDivData.constantSpace, ctx, Sync_Copy, Sync_Compute));
+				ctx.SetComputeShaderResourceView(7,		resources.GetResource(subDivData.faceLookup));
+				ctx.SetComputeUnorderedAccessView(8,	resources.GetResource(subDivData.cbt));
+				ctx.SetComputeUnorderedAccessView(9,	resources.GetResource(subDivData.faceDrawList));
+				ctx.SetComputeUnorderedAccessView(10,	resources.GetResource(subDivData.indirectDraw));
 
 				DescriptorHeap cages;
 				DescriptorHeap points;
@@ -585,27 +502,32 @@ namespace FlexKit
 				const uint dispatchX = controlCageFaces / 32 + (controlCageFaces % 32 == 0 ? 0 : 1);
 				struct
 				{
-					uint	dispatchesRemaining;
-					uint	patchCount;
-					uint	halfEdgeCount;
 					uint3	xyz;
+					uint	dispatchesRemaining;
+					uint	faceCounter = 0;
+					uint	edgeCounter	= 0;
 				}	const arguments{
-					.dispatchesRemaining	= dispatchX,
-					.patchCount				= 0,//controlCageFaces,
-					.halfEdgeCount			= 0,//patchCount[0], 
 					.xyz					= uint3(dispatchX, 1, 1),
+					.dispatchesRemaining	= dispatchX,
 				};
 
 				ctx.FlushBarriers();
 
 				D3D12_DISPATCH_GRAPH_DESC dispatch;
 				dispatch.Mode = D3D12_DISPATCH_MODE::D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
-				dispatch.NodeCPUInput.EntrypointIndex		= subdivide;
 				dispatch.NodeCPUInput.NumRecords			= 1;
 				dispatch.NodeCPUInput.pRecords				= &arguments;
 				dispatch.NodeCPUInput.RecordStrideInBytes	= sizeof(arguments);
+
+				dispatch.NodeCPUInput.EntrypointIndex = classify;
 				ctx.DeviceContext->DispatchGraph(&dispatch);
-				
+
+				ctx.AddUAVBarrier(cbt.GetBuffer());
+				ctx.FlushBarriers();
+
+				dispatch.NodeCPUInput.EntrypointIndex = subdivide;
+				ctx.DeviceContext->DispatchGraph(&dispatch);
+
 				for (auto&& [idx, cage] : enumerate(subDivData.outputCages))
 					ctx.AddUAVBarrier(resources.GetResource(cage));
 
@@ -621,11 +543,8 @@ namespace FlexKit
 	/************************************************************************************************/
 
 
-	void HalfEdgeMesh::DrawSubDivLevel_DEBUG(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget, ResourceHandle depthTarget, uint32_t targetLevel)
+	void HalfEdgeMesh::DrawSubDivLevel_DEVEL(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget, ResourceHandle depthTarget, AdaptiveUpdate& subDivTask)
 	{
-		if (levelsBuilt == 0)
-			return;
-
 		struct DrawLevel
 		{
 			FrameResourceHandle renderTarget;
@@ -634,6 +553,8 @@ namespace FlexKit
 			FrameResourceHandle inputVerts;
 			FrameResourceHandle inputFaces;
 			FrameResourceHandle faceLookup;
+			FrameResourceHandle faceDrawList;
+			FrameResourceHandle indirectDraw;
 		};
 
 		frameGraph.AddNode<DrawLevel>(
@@ -646,11 +567,13 @@ namespace FlexKit
 				visData.renderTarget	= builder.RenderTarget(renderTarget);
 				visData.depthTarget		= builder.DepthTarget(depthTarget);
 				visData.inputCage		= builder.NonPixelShaderResource(controlCage);
-				visData.inputVerts		= builder.NonPixelShaderResource(points[targetLevel]);
+				visData.inputVerts		= builder.NonPixelShaderResource(points[0]);
 				visData.faceLookup		= builder.NonPixelShaderResource(faceLookup);
 				visData.inputFaces		= builder.NonPixelShaderResource(controlFaces);
+				visData.faceDrawList	= builder.NonPixelShaderResource(subDivTask.faceDrawList);
+				visData.indirectDraw	= builder.NonPixelShaderResource(subDivTask.indirectDraw);
 			},
-			[this, camera, targetLevel](DrawLevel& visData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
+			[this, camera](DrawLevel& visData, ResourceHandler& resources, Context& ctx, iAllocator& threadLocalAllocator)
 			{
 				ctx.BeginEvent_DEBUG("Draw HE Mesh");
 				ctx.FlushBarriers();
@@ -661,20 +584,23 @@ namespace FlexKit
 				ctx.SetGraphicsShaderResourceView(1, resources.NonPixelShaderResource(visData.inputVerts, ctx, Sync_Compute, Sync_All));
 				ctx.SetGraphicsShaderResourceView(2, resources.NonPixelShaderResource(visData.inputFaces, ctx, Sync_Compute, Sync_All));
 				ctx.SetGraphicsShaderResourceView(3, resources.NonPixelShaderResource(visData.faceLookup, ctx, Sync_Compute, Sync_All));
+				ctx.SetGraphicsShaderResourceView(4, resources.NonPixelShaderResource(visData.faceDrawList, ctx, Sync_Compute, Sync_All));
 
 				struct {
 					float4x4_GPU	PV;
 					uint32_t		patchCount;
+					uint32_t		maxDepth;
 				}	constants{
 						.PV			= GetCameraConstants(camera).PV,
-						.patchCount = patchCount[targetLevel]
+						.patchCount = 0,
+						.maxDepth	= cbt.GetMaxDepth()
 				};
 
-				ctx.SetGraphicsConstantValue(4, 17, &constants);
+				ctx.SetGraphicsConstantValue(5, 18, &constants);
 				ctx.SetScissorAndViewports(renderTargets);
 				ctx.SetRenderTargets(renderTargets, true, resources.GetResource(visData.depthTarget));
-				ctx.DispatchMesh({ patchCount[targetLevel] / 32 + (patchCount[targetLevel] % 32 == 0 ? 0 : 1), 1, 1 });
 
+				ctx.ExecuteIndirect(resources.GetResource(visData.indirectDraw), indirectDraw);
 				ctx.EndEvent_DEBUG();
 			});
 	}

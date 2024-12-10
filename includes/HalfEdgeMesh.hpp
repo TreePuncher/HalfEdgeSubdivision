@@ -35,6 +35,8 @@ namespace FlexKit
 	};
 
 
+	struct AdaptiveUpdate;
+
 	struct HalfEdgeMesh
 	{
 		struct HalfEdgeVertex
@@ -54,27 +56,28 @@ namespace FlexKit
 		~HalfEdgeMesh();
 
 
-		void InitializeMesh(FlexKit::FrameGraph& frameGraph);
-		void BuildSubDivLevel(FlexKit::FrameGraph& frameGraph);
-		void AdaptiveSubdivUpdate(FlexKit::FrameGraph& frameGraph, FlexKit::CameraHandle camera);
+		void			InitializeMesh(FrameGraph& frameGraph);
+		AdaptiveUpdate& AdaptiveSubdivUpdate(FrameGraph& frameGraph, CameraHandle camera);
 
 		
 		/************************************************************************************************/
 
 
-		void DrawSubDivLevel_DEBUG(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget, ResourceHandle depthTarget, uint32_t targetLevel = 0);
+		void DrawSubDivLevel_DEVEL(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget, ResourceHandle depthTarget, AdaptiveUpdate&);
 
-		static constexpr PSOHandle EdgeUpdate		= PSOHandle{ GetTypeGUID(HEEdgeUpdate) };
-		static constexpr PSOHandle BuildBisectors	= PSOHandle{ GetTypeGUID(HEBuildBisectors) };
-		static constexpr PSOHandle BuildLevel		= PSOHandle{ GetTypeGUID(HEBuildLevel) };
-		static constexpr PSOHandle FacePass			= PSOHandle{ GetTypeGUID(HEFacePass) };
-		static constexpr PSOHandle VertexUpdate		= PSOHandle{ GetTypeGUID(HEVertexUpdate) };
-		static constexpr PSOHandle RenderFaces		= PSOHandle{ GetTypeGUID(HERenderFaces) };
-		static constexpr PSOHandle RenderWireframe	= PSOHandle{ GetTypeGUID(RenderWireframe) };
-		
+		static constexpr PSOHandle EdgeUpdate			= PSOHandle{ GetTypeGUID(HEEdgeUpdate) };
+		static constexpr PSOHandle BuildBisectors		= PSOHandle{ GetTypeGUID(HEBuildBisectors) };
+		static constexpr PSOHandle BuildLevel			= PSOHandle{ GetTypeGUID(HEBuildLevel) };
+		static constexpr PSOHandle FacePass				= PSOHandle{ GetTypeGUID(HEFacePass) };
+		static constexpr PSOHandle VertexUpdate			= PSOHandle{ GetTypeGUID(HEVertexUpdate) };
+		static constexpr PSOHandle RenderFaces			= PSOHandle{ GetTypeGUID(HERenderFaces) };
+		static constexpr PSOHandle RenderWireframe		= PSOHandle{ GetTypeGUID(RenderWireframe) };
+
+		inline static IndirectLayout		indirectDraw;
 		inline static GPUStateObject_ptr	updateState		= nullptr;
 		inline static RootSignature*		globalRoot		= nullptr;
 		inline static uint32_t				initiate		= -1;
+		inline static uint32_t				classify		= -1;
 		inline static uint32_t				subdivide		= -1;
 		inline static ProgramIdentifier		programID;
 
