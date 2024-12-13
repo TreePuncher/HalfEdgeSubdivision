@@ -65,34 +65,10 @@ namespace FlexKit
 
 		void DrawSubDivLevel_DEVEL(FrameGraph& frameGraph, CameraHandle camera, UpdateTask* update, ResourceHandle renderTarget, ResourceHandle depthTarget, AdaptiveUpdate&);
 
-		static constexpr PSOHandle EdgeUpdate			= PSOHandle{ GetTypeGUID(HEEdgeUpdate) };
-		static constexpr PSOHandle BuildBisectors		= PSOHandle{ GetTypeGUID(HEBuildBisectors) };
-		static constexpr PSOHandle BuildLevel			= PSOHandle{ GetTypeGUID(HEBuildLevel) };
-		static constexpr PSOHandle FacePass				= PSOHandle{ GetTypeGUID(HEFacePass) };
-		static constexpr PSOHandle VertexUpdate			= PSOHandle{ GetTypeGUID(HEVertexUpdate) };
-		static constexpr PSOHandle RenderFaces			= PSOHandle{ GetTypeGUID(HERenderFaces) };
-		static constexpr PSOHandle RenderWireframe		= PSOHandle{ GetTypeGUID(RenderWireframe) };
+		static constexpr PSOHandle DrawRegularQuadFace	= PSOHandle{ GetTypeGUID(DrawRegularQuadFace) };
 
-		inline static IndirectLayout		indirectDraw;
-		inline static GPUStateObject_ptr	updateState		= nullptr;
-		inline static RootSignature*		globalRoot		= nullptr;
-		inline static uint32_t				initiate		= -1;
-		inline static uint32_t				classify		= -1;
-		inline static uint32_t				subdivide		= -1;
-		inline static ProgramIdentifier		programID;
-
-		uint32_t			controlCageSize		= 0;
-		uint32_t			controlCageFaces	= 0;
-		ResourceHandle		controlFaces		= InvalidHandle;
-		ResourceHandle		controlCage			= InvalidHandle;
-		ResourceHandle		controlPoints		= InvalidHandle;
-		ResourceHandle		faceLookup			= InvalidHandle;
-		ResourceHandle		levels[3]			= { InvalidHandle, InvalidHandle, InvalidHandle };
-		ResourceHandle		points[3]			= { InvalidHandle, InvalidHandle, InvalidHandle };
-		uint32_t			edgeCount[3]		= { 0, 0, 0 };
-		uint32_t			patchCount[3]		= { 0, 0, 0 };
-		uint8_t				levelsBuilt			= 0;
-		CBTBuffer			cbt;
+		ResourceHandle vertexBuffer = InvalidHandle;
+		ResourceHandle quadBuffer	= InvalidHandle;
 	};
 
 }

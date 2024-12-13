@@ -113,18 +113,6 @@ FlexKit::ModifiableShape LoadObjIntoShape(std::filesystem::path p)
 	}
 
 
-	/*
-PointToken,
-TextureCoordinateToken,
-NormalToken,
-TangentToken,
-MaterialToken,
-JointWeightToken,
-JointIndexToken,
-VertexToken,
-MorphTargetVertexToken
-	*/
-
 	for (const MeshToken& token : TL)
 	{
 		std::visit(
@@ -194,7 +182,9 @@ struct CBTTerrainState : FlexKit::FrameworkState
 #if 1
 		//ModifiableShape shape = LoadObjIntoShape(R"(assets\wolfgirl.obj)");
 		//ModifiableShape shape = LoadObjIntoShape(R"(assets\ferris.obj)");
-		ModifiableShape shape = LoadObjIntoShape(R"(assets\marie2.obj)");
+		//ModifiableShape shape = LoadObjIntoShape(R"(assets\marie2.obj)");
+		ModifiableShape shape = LoadObjIntoShape(R"(assets\RegularFace.obj)");
+		//ModifiableShape shape = LoadObjIntoShape(R"(assets\RegularFace2.obj)");
 		//ModifiableShape shape = LoadObjIntoShape(R"(assets\TestPlane.obj)");
 		//ModifiableShape shape = LoadObjIntoShape(R"(assets\imrod.obj)");
 #else
